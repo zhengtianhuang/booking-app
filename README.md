@@ -41,4 +41,6 @@ cd ~/Desktop/booking-app && python3 -m http.server 8000
 - 預約範圍固定是未來 60 天，最少要提前 5 分鐘。
 
 ## 狀態
-- 2026-10-20：程式寫好，等 Supabase 專案建立後填入 config.js 才能實際測試。
+- 2026-10-20：Supabase 專案 `booking-app`（stkwjmhkcnpxlunghipr，Seoul）已建立、schema 已執行、Site URL / Redirect 已設、Email 驗證已關。
+- 後端 22 項測試全過（重複預約、超出時段、過去時間、隱私 RLS、取消後可再訂）；公開預約頁畫面確認正常。
+- 測試資料：使用者 `test-520f17` 和兩個 slotly-test-…@example.com 帳號，可在 Supabase → Authentication → Users 刪掉。
