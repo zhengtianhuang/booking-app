@@ -156,3 +156,10 @@ $$;
 
 grant execute on function public.get_busy(uuid, timestamptz, timestamptz) to anon, authenticated;
 grant execute on function public.book_slot(uuid, timestamptz, text, text, text) to anon, authenticated;
+
+-- Explicit table grants (RLS above still decides which rows), so this doesn't depend
+-- on the project's "automatically expose new tables" setting.
+grant usage on schema public to anon, authenticated;
+grant select on public.profiles, public.event_types, public.availability to anon, authenticated;
+grant insert, update, delete on public.profiles, public.event_types, public.availability to authenticated;
+grant select, update on public.bookings to authenticated;
