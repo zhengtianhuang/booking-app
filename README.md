@@ -28,6 +28,13 @@
    - （選擇性）**Authentication → Providers → Email** 關掉 “Confirm email”，註冊後就能直接登入。Supabase 內建寄信每小時只能寄幾封，測試時建議先關掉。
 5. 推上 GitHub，Pages 會自動更新。
 
+## 手機 App（PWA）
+網站可以直接安裝成手機 App，不用上架：
+- iPhone：用 Safari 打開 → 分享 → 加入主畫面
+- Android：用 Chrome 打開 → 選單 → 安裝應用程式 / 加到主畫面
+- `manifest.webmanifest` + `sw.js` + `icons/`。sw.js 只快取網站本身和 CDN 套件，Supabase 的資料一律即時抓。
+- 改了 style/app/config 要同時把 index.html 和 sw.js 裡的 `?v=N` 和 `CACHE` 名稱加 1。
+
 ## 本機測試
 ```
 cd ~/Desktop/booking-app && python3 -m http.server 8000
