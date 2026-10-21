@@ -641,8 +641,13 @@
   window.addEventListener("hashchange", route);
   (async () => {
     if (sb) {
-      sb.auth.onAuthStateChange(async (event) => {
-        if (event === "SIGNED_IN" || event === "SIGNED_OUT") { await loadMe(); route(); }
+      // supabase-js holds an auth lock while this callback runs, so calling getSession()
+      // (via loadMe) inside it deadlocks signIn. Defer the work, and only re-render when
+      // the user actually changed — SIGNED_IN also fires on tab refocus and would wipe forms.
+      sb.auth.onAuthStateChange((event, s) => {
+        const uid = s?.user?.id ?? null;
+        if (uid === (session?.user?.id ?? null)) return;
+        setTimeout(async () => { await loadMe(); route(); }, 0);
       });
       try { await loadMe(); } catch (e) { console.error(e); }
     }
