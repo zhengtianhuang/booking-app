@@ -34,8 +34,16 @@ cd ~/Desktop/booking-app && python3 -m http.server 8000
 ```
 打開 http://localhost:8000
 
+## Email 通知（已接上）
+預約成功 / 取消 → Postgres trigger（`notifications.sql`）→ `pg_net` → Google Apps Script（`apps-script/Code.gs`，跑在 zhengtian0629@gmail.com）→ 寄信。
+- 主人和預約者各收到一封信，附「加到 Google 日曆」按鈕 + .ics；**不會自動寫進任何人的日曆**（使用者選的）
+- 取消預約 → 寄取消通知給預約者
+- 信從 zhengtian0629@gmail.com 寄出，Gmail 一天約 100 封
+- 密鑰和 Web App 網址只存在 Supabase `private.settings` 和 Apps Script 裡，repo 裡是 placeholder
+- 除錯：SQL Editor 跑 `select * from net._http_response order by created desc limit 5;`
+- 改 Code.gs 後要「部署 → 管理部署作業 → 編輯 → 新版本」才會生效
+
 ## 目前限制 / 之後可以加
-- 預約成功**不會寄 email 通知**（免費方案沒有好用的寄信服務）。主人要到後台看；之後可以接 EmailJS 或 Google Apps Script 寄信。
 - 沒有同步 Google 日曆的忙碌時間（需要 OAuth，比較複雜）。
 - 一個時段只能一個人訂（沒有「一堂課 10 個名額」）。之後如果要給 1010dance 開課用，可以再加。
 - 預約範圍固定是未來 60 天，最少要提前 5 分鐘。
