@@ -102,7 +102,8 @@ button:disabled { opacity: .55; cursor: default; }
 .day-name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .day-name input { width: auto; }
 .range { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
-.range input { width: 120px; padding: 7px 8px; }
+.range select { width: 96px; padding: 7px 8px; }
+@media (max-width: 520px) { .day-row { grid-template-columns: 1fr; gap: 6px; } }
 
 /* booking page */
 .booker { display: grid; grid-template-columns: 1fr; gap: 16px; }

@@ -330,7 +330,13 @@
     const rows = must(await sb.from("availability").select("*").eq("user_id", me.id).order("start_time"));
     const byDay = Array.from({ length: 7 }, (_, d) => rows.filter((r) => r.weekday === d).map((r) => [r.start_time.slice(0, 5), r.end_time.slice(0, 5)]));
     const order = [1, 2, 3, 4, 5, 6, 0]; // Monday first
-    const rangeHtml = ([s, e]) => `<div class="range"><input type="time" value="${s}" class="rs"> – <input type="time" value="${e}" class="re">
+    // Dropdowns instead of <input type="time">: the native control squeezes "上午/下午" in and hides the time.
+    const STEPS = [];
+    for (let m = 0; m < 24 * 60; m += 15) STEPS.push(`${String(m / 60 | 0).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+    STEPS.push("23:59"); // end of day, shown as 24:00
+    const timeSelect = (cls, val) => `<select class="${cls}">${[...new Set([...STEPS, val])].sort()
+      .map((v) => `<option value="${v}" ${v === val ? "selected" : ""}>${v === "23:59" ? "24:00" : v}</option>`).join("")}</select>`;
+    const rangeHtml = ([s, e]) => `<div class="range">${timeSelect("rs", s)} – ${timeSelect("re", e)}
       <button type="button" class="btn-ghost btn-small rm" title="${t("delete")}">✕</button></div>`;
     $tab.innerHTML = `
       <form class="card" id="av">
