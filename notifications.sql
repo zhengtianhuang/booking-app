@@ -11,6 +11,7 @@ create table if not exists private.settings (
   key   text primary key,
   value text not null
 );
+alter table private.settings enable row level security; -- no policies: only definer functions read it
 
 insert into private.settings (key, value) values
   ('webhook_url',    'PASTE-APPS-SCRIPT-WEB-APP-URL'),
@@ -48,6 +49,8 @@ begin
     'invitee_name',  new.invitee_name,
     'invitee_email', new.invitee_email,
     'note',          new.note,
+    'price',         new.price,
+    'currency',      new.currency,
     'event_title',   et.title,
     'location',      et.location,
     'description',   et.description,

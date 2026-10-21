@@ -28,6 +28,10 @@ create table if not exists public.event_types (
 -- added 2026-10-21; for databases created before buffer_min existed
 alter table public.event_types add column if not exists buffer_min int not null default 10
   check (buffer_min between 0 and 120);
+-- added 2026-10-21: optional price shown to invitees (null = free). Display only, no payment.
+alter table public.event_types add column if not exists price numeric(10,2) check (price >= 0);
+alter table public.event_types add column if not exists currency text not null default 'AUD'
+  check (currency ~ '^[A-Z]{3}$');
 
 -- Weekly hours, in the host's own timezone. weekday: 0 = Sunday … 6 = Saturday.
 create table if not exists public.availability (
@@ -51,11 +55,16 @@ create table if not exists public.bookings (
   status         text not null default 'confirmed' check (status in ('confirmed', 'cancelled')),
   created_at     timestamptz not null default now(),
   -- Database-level guarantee: one host can never have two overlapping confirmed bookings.
+  price          numeric(10,2),             -- snapshot of the event type's price when booked
+  currency       text,
   constraint no_double_booking exclude using gist (
     host_id with =,
     tstzrange(start_at, end_at) with &&
   ) where (status = 'confirmed')
 );
+
+alter table public.bookings add column if not exists price numeric(10,2);
+alter table public.bookings add column if not exists currency text;
 
 -- ---------- row level security ----------
 alter table public.profiles     enable row level security;
@@ -160,8 +169,8 @@ begin
   end if;
 
   begin
-    insert into bookings (event_type_id, host_id, start_at, end_at, invitee_name, invitee_email, note)
-    values (et.id, et.user_id, p_start, v_end, trim(p_name), lower(trim(p_email)), coalesce(p_note, ''))
+    insert into bookings (event_type_id, host_id, start_at, end_at, invitee_name, invitee_email, note, price, currency)
+    values (et.id, et.user_id, p_start, v_end, trim(p_name), lower(trim(p_email)), coalesce(p_note, ''), et.price, et.currency)
     returning id into v_id;
   exception when exclusion_violation then
     raise exception 'SLOT_TAKEN';

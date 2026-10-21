@@ -18,7 +18,8 @@
 
   const BOOKING_WINDOW_DAYS = 60;
   const MIN_NOTICE_MIN = 5;
-  const DURATIONS = [15, 30, 45, 60, 90, 120];
+  const DURATIONS = Array.from({ length: 48 }, (_, i) => (i + 1) * 10); // 10 min … 8 h
+  const CURRENCIES = ["AUD", "TWD", "USD", "NZD", "JPY", "EUR", "GBP"];
 
   // ---------- i18n ----------
   const STR = {
@@ -31,7 +32,7 @@
       displayName: "顯示名稱", timezone: "你的時區", save: "儲存", saved: "已儲存",
       events: "預約類型", availability: "可預約時間", bookings: "預約紀錄", profile: "個人設定",
       newEvent: "+ 新增預約類型", editEvent: "編輯預約類型", title: "名稱", slug: "網址代號",
-      duration: "長度", minutes: "分鐘", buffer: "預約間隔", bufferHint: "每個預約前後保留的空檔", description: "說明", location: "地點 / 會議連結", active: "開放預約",
+      duration: "長度", minutes: "分鐘", buffer: "預約間隔", bufferHint: "每個預約前後保留的空檔", price: "價格", priceHint: "留空 = 免費。只顯示價格，不會線上收款", free: "免費", durationHint: "以 10 分鐘為單位", description: "說明", location: "地點 / 會議連結", active: "開放預約",
       copyLink: "複製連結", copied: "連結已複製", edit: "編輯", delete: "刪除", cancel: "取消", close: "關閉",
       off: "已關閉", noEvents: "還沒有預約類型，先新增一個吧", yourPage: "你的公開預約頁",
       weekdays: ["週日", "週一", "週二", "週三", "週四", "週五", "週六"], addRange: "+ 時段", unavailable: "不開放",
@@ -59,7 +60,7 @@
       displayName: "Display name", timezone: "Your timezone", save: "Save", saved: "Saved",
       events: "Event types", availability: "Availability", bookings: "Bookings", profile: "Profile",
       newEvent: "+ New event type", editEvent: "Edit event type", title: "Title", slug: "URL slug",
-      duration: "Duration", minutes: "min", buffer: "Buffer between bookings", bufferHint: "Free time kept before and after each booking", description: "Description", location: "Location / meeting link", active: "Accepting bookings",
+      duration: "Duration", minutes: "min", buffer: "Buffer between bookings", bufferHint: "Free time kept before and after each booking", price: "Price", priceHint: "Leave empty for free. Shown only — no online payment", free: "Free", durationHint: "In 10-minute steps", description: "Description", location: "Location / meeting link", active: "Accepting bookings",
       copyLink: "Copy link", copied: "Link copied", edit: "Edit", delete: "Delete", cancel: "Cancel", close: "Close",
       off: "Off", noEvents: "No event types yet — create one", yourPage: "Your public booking page",
       weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], addRange: "+ Hours", unavailable: "Unavailable",
@@ -97,6 +98,12 @@
   const baseUrl = () => location.origin + location.pathname;
   const pageUrl = (username, slug) => `${baseUrl()}#/u/${username}${slug ? "/" + slug : ""}`;
   const locale = () => (lang === "zh" ? "zh-TW" : "en-AU");
+  const fmtDur = (m) => (m % 60 === 0 ? `${m / 60} h` : m > 60 ? `${Math.floor(m / 60)} h ${m % 60} ${t("minutes")}` : `${m} ${t("minutes")}`);
+  const fmtPrice = (price, cur) => {
+    if (price == null) return t("free");
+    // Always show the code: zh-TW renders both TWD and AUD as plain "$".
+    return `${cur || "AUD"} ${Number(price).toLocaleString(locale(), { minimumFractionDigits: price % 1 ? 2 : 0, maximumFractionDigits: 2 })}`;
+  };
 
   let toastTimer;
   function toast(msg, isError = false) {
@@ -274,7 +281,7 @@
         <div class="row spread"><h2>${t("events")}</h2><button class="btn-small" id="newEv">${t("newEvent")}</button></div>
         ${rows.length ? rows.map((r) => `
           <div class="list-item">
-            <div><strong>${esc(r.title)}</strong> <span class="pill ${r.active ? "" : "off"}">${r.active ? `${r.duration_min} ${t("minutes")}` : t("off")}</span>
+            <div><strong>${esc(r.title)}</strong> <span class="pill ${r.active ? "" : "off"}">${r.active ? `${fmtDur(r.duration_min)} · ${esc(fmtPrice(r.price, r.currency))}` : t("off")}</span>
               <div class="muted small">/${esc(me.username)}/${esc(r.slug)}</div></div>
             <div class="row">
               <button class="btn-ghost btn-small" data-copy="${esc(r.slug)}">${t("copyLink")}</button>
@@ -289,7 +296,7 @@
 
     function eventForm(ev) {
       const $f = document.getElementById("evForm");
-      const d = ev || { title: "", slug: "", duration_min: 30, buffer_min: 10, description: "", location: "", active: true };
+      const d = ev || { title: "", slug: "", duration_min: 30, buffer_min: 10, price: null, currency: "AUD", description: "", location: "", active: true };
       $f.innerHTML = `
         <form class="card" id="ef">
           <h2>${ev ? t("editEvent") : t("newEvent").replace("+ ", "")}</h2>
@@ -297,7 +304,15 @@
           <label>${t("slug")}</label><input name="slug" required pattern="[a-z0-9][a-z0-9\\-]{0,39}" value="${esc(d.slug)}">
           <label>${t("duration")}</label>
           <select name="duration_min">${[...new Set([...DURATIONS, d.duration_min])].sort((a, b) => a - b)
-            .map((m) => `<option value="${m}" ${m === d.duration_min ? "selected" : ""}>${m} ${t("minutes")}</option>`).join("")}</select>
+            .map((m) => `<option value="${m}" ${m === d.duration_min ? "selected" : ""}>${fmtDur(m)}</option>`).join("")}</select>
+          <div class="hint">${t("durationHint")}</div>
+          <label>${t("price")}</label>
+          <div class="row" style="flex-wrap:nowrap">
+            <select name="currency" style="width:100px">${[...new Set([...CURRENCIES, d.currency])]
+              .map((c) => `<option ${c === d.currency ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+            <input name="price" type="number" min="0" step="0.01" inputmode="decimal" placeholder="${t("free")}" value="${d.price ?? ""}">
+          </div>
+          <div class="hint">${t("priceHint")}</div>
           <label>${t("buffer")}</label>
           <select name="buffer_min">${[...new Set([0, 5, 10, 15, 20, 30, d.buffer_min])].sort((a, b) => a - b)
             .map((m) => `<option value="${m}" ${m === d.buffer_min ? "selected" : ""}>${m} ${t("minutes")}</option>`).join("")}</select>
@@ -327,6 +342,7 @@
         const row = {
           user_id: me.id, title: f.get("title"), slug: f.get("slug").toLowerCase(),
           duration_min: +f.get("duration_min"), buffer_min: +f.get("buffer_min"), location: f.get("location"),
+          price: f.get("price") === "" ? null : +f.get("price"), currency: f.get("currency"),
           description: f.get("description"), active: f.get("active") === "on",
         };
         const { error } = ev ? await sb.from("event_types").update(row).eq("id", ev.id) : await sb.from("event_types").insert(row);
@@ -412,7 +428,7 @@
     const fmt = (iso) => DateTime.fromISO(iso).setZone(me.timezone).setLocale(locale()).toFormat("ccc, d LLL yyyy · HH:mm");
     const item = (r, canCancel) => `
       <div class="list-item">
-        <div><strong>${esc(fmt(r.start_at))}</strong> <span class="pill ${r.status === "cancelled" ? "off" : ""}">${esc(r.event_types?.title || "")}${r.status === "cancelled" ? " · " + t("cancelled") : ""}</span>
+        <div><strong>${esc(fmt(r.start_at))}</strong> <span class="pill ${r.status === "cancelled" ? "off" : ""}">${esc(r.event_types?.title || "")}${r.price != null ? " · " + esc(fmtPrice(r.price, r.currency)) : ""}${r.status === "cancelled" ? " · " + t("cancelled") : ""}</span>
           <div class="small">${t("invitee")}: ${esc(r.invitee_name)} · <a href="mailto:${esc(r.invitee_email)}">${esc(r.invitee_email)}</a></div>
           ${r.note ? `<div class="muted small">“${esc(r.note)}”</div>` : ""}</div>
         ${canCancel ? `<button class="btn-danger btn-small" data-cancel="${esc(r.id)}">${t("cancelBooking")}</button>` : ""}
@@ -464,7 +480,7 @@
       <div class="card narrow center"><h1>${esc(host.display_name || host.username)}</h1></div>
       <div class="narrow">${evs.length ? evs.map((e) => `
         <a class="card" style="display:block;color:inherit" href="#/u/${encodeURIComponent(host.username)}/${encodeURIComponent(e.slug)}">
-          <strong>${esc(e.title)}</strong> <span class="pill">${e.duration_min} ${t("minutes")}</span>
+          <strong>${esc(e.title)}</strong> <span class="pill">${fmtDur(e.duration_min)} · ${esc(fmtPrice(e.price, e.currency))}</span>
           ${e.description ? `<p class="muted small" style="margin:6px 0 0">${esc(e.description)}</p>` : ""}
         </a>`).join("") : `<div class="card empty">${t("noEvents")}</div>`}</div>`;
   }
@@ -511,7 +527,8 @@
       <div class="event-info">
         <p class="muted" style="margin:0">${esc(host.display_name || host.username)}</p>
         <h1>${esc(ev.title)}</h1>
-        <p>⏱ ${ev.duration_min} ${t("minutes")}</p>
+        <p>⏱ ${fmtDur(ev.duration_min)}</p>
+        <p>💲 ${esc(fmtPrice(ev.price, ev.currency))}</p>
         ${ev.location ? `<p>📍 ${esc(ev.location)}</p>` : ""}
         ${ev.description ? `<p class="muted small" style="white-space:pre-wrap">${esc(ev.description)}</p>` : ""}
       </div>`;
@@ -637,7 +654,7 @@
           <div class="success">✅</div>
           <h1>${t("booked")}</h1>
           <p class="muted">${esc(t("bookedWith", { name }))}</p>
-          <p><strong>${esc(ev.title)}</strong><br>${esc(slotLabel(iso))}</p>
+          <p><strong>${esc(ev.title)}</strong><br>${esc(slotLabel(iso))}<br>💲 ${esc(fmtPrice(ev.price, ev.currency))}</p>
           ${ev.location ? `<p>📍 ${esc(ev.location)}</p>` : ""}
           <div class="row" style="justify-content:center">
             <a class="btn" href="${gcal}" target="_blank" rel="noopener">${t("addGoogle")}</a>

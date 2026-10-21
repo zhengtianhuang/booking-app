@@ -30,6 +30,7 @@ function onBooked(d) {
     ["時間 When", when],
     ["預約人 Invitee", d.invitee_name + " <" + d.invitee_email + ">"],
     d.location ? ["地點 Location", d.location] : null,
+    priceRow(d),
     d.note ? ["留言 Note", d.note] : null,
   ];
   MailApp.sendEmail({
@@ -43,7 +44,7 @@ function onBooked(d) {
     to: d.invitee_email,
     subject: "✅ 預約成功 Booking confirmed: " + d.event_title + " — " + d.host_name,
     htmlBody: page("你已預約 " + d.host_name + " 的「" + d.event_title + "」",
-      [["時間 When", when], d.location ? ["地點 Location", d.location] : null], gcalLink(d, d.host_name)),
+      [["時間 When", when], d.location ? ["地點 Location", d.location] : null, priceRow(d)], gcalLink(d, d.host_name)),
     replyTo: d.host_email,
     attachments: [ics],
   });
@@ -57,6 +58,12 @@ function onCancelled(d) {
     htmlBody: page(d.host_name + " 取消了「" + d.event_title + "」的預約", [["時間 When", when]], null),
     replyTo: d.host_email,
   });
+}
+
+function priceRow(d) {
+  if (d.price == null) return null;
+  const n = Number(d.price);
+  return ["價格 Price", (d.currency || "") + " " + (n % 1 === 0 ? n.toFixed(0) : n.toFixed(2))];
 }
 
 function whenText(d) {
