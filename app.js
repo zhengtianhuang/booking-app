@@ -4,7 +4,15 @@
   const { DateTime } = luxon;
   const cfg = window.SLOTLY_CONFIG || {};
   const configured = cfg.SUPABASE_URL && !cfg.SUPABASE_URL.includes("YOUR-PROJECT");
-  const sb = configured ? supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY) : null;
+  // Per-tab lock instead of supabase-js's default cross-tab navigator.locks: with the default,
+  // one stuck tab holds the auth lock and every other tab of the site hangs on "Loading…".
+  let lockChain = Promise.resolve();
+  const tabLock = (_name, _timeout, fn) => {
+    const run = lockChain.then(fn, fn);
+    lockChain = run.catch(() => {});
+    return run;
+  };
+  const sb = configured ? supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { lock: tabLock } }) : null;
   const $app = document.getElementById("app");
   const $nav = document.getElementById("nav");
 
