@@ -31,7 +31,7 @@
       displayName: "顯示名稱", timezone: "你的時區", save: "儲存", saved: "已儲存",
       events: "預約類型", availability: "可預約時間", bookings: "預約紀錄", profile: "個人設定",
       newEvent: "+ 新增預約類型", editEvent: "編輯預約類型", title: "名稱", slug: "網址代號",
-      duration: "長度", minutes: "分鐘", description: "說明", location: "地點 / 會議連結", active: "開放預約",
+      duration: "長度", minutes: "分鐘", buffer: "預約間隔", bufferHint: "每個預約前後保留的空檔", description: "說明", location: "地點 / 會議連結", active: "開放預約",
       copyLink: "複製連結", copied: "連結已複製", edit: "編輯", delete: "刪除", cancel: "取消", close: "關閉",
       off: "已關閉", noEvents: "還沒有預約類型，先新增一個吧", yourPage: "你的公開預約頁",
       weekdays: ["週日", "週一", "週二", "週三", "週四", "週五", "週六"], addRange: "+ 時段", unavailable: "不開放",
@@ -59,7 +59,7 @@
       displayName: "Display name", timezone: "Your timezone", save: "Save", saved: "Saved",
       events: "Event types", availability: "Availability", bookings: "Bookings", profile: "Profile",
       newEvent: "+ New event type", editEvent: "Edit event type", title: "Title", slug: "URL slug",
-      duration: "Duration", minutes: "min", description: "Description", location: "Location / meeting link", active: "Accepting bookings",
+      duration: "Duration", minutes: "min", buffer: "Buffer between bookings", bufferHint: "Free time kept before and after each booking", description: "Description", location: "Location / meeting link", active: "Accepting bookings",
       copyLink: "Copy link", copied: "Link copied", edit: "Edit", delete: "Delete", cancel: "Cancel", close: "Close",
       off: "Off", noEvents: "No event types yet — create one", yourPage: "Your public booking page",
       weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], addRange: "+ Hours", unavailable: "Unavailable",
@@ -289,7 +289,7 @@
 
     function eventForm(ev) {
       const $f = document.getElementById("evForm");
-      const d = ev || { title: "", slug: "", duration_min: 30, description: "", location: "", active: true };
+      const d = ev || { title: "", slug: "", duration_min: 30, buffer_min: 10, description: "", location: "", active: true };
       $f.innerHTML = `
         <form class="card" id="ef">
           <h2>${ev ? t("editEvent") : t("newEvent").replace("+ ", "")}</h2>
@@ -298,6 +298,10 @@
           <label>${t("duration")}</label>
           <select name="duration_min">${[...new Set([...DURATIONS, d.duration_min])].sort((a, b) => a - b)
             .map((m) => `<option value="${m}" ${m === d.duration_min ? "selected" : ""}>${m} ${t("minutes")}</option>`).join("")}</select>
+          <label>${t("buffer")}</label>
+          <select name="buffer_min">${[...new Set([0, 5, 10, 15, 20, 30, d.buffer_min])].sort((a, b) => a - b)
+            .map((m) => `<option value="${m}" ${m === d.buffer_min ? "selected" : ""}>${m} ${t("minutes")}</option>`).join("")}</select>
+          <div class="hint">${t("bufferHint")}</div>
           <label>${t("location")}</label><input name="location" value="${esc(d.location)}">
           <label>${t("description")}</label><textarea name="description">${esc(d.description)}</textarea>
           <label class="row"><input type="checkbox" name="active" style="width:auto" ${d.active ? "checked" : ""}> ${t("active")}</label>
@@ -322,7 +326,7 @@
         const f = new FormData(form);
         const row = {
           user_id: me.id, title: f.get("title"), slug: f.get("slug").toLowerCase(),
-          duration_min: +f.get("duration_min"), location: f.get("location"),
+          duration_min: +f.get("duration_min"), buffer_min: +f.get("buffer_min"), location: f.get("location"),
           description: f.get("description"), active: f.get("active") === "on",
         };
         const { error } = ev ? await sb.from("event_types").update(row).eq("id", ev.id) : await sb.from("event_types").insert(row);
@@ -466,7 +470,8 @@
   }
 
   // All bookable start times (UTC ISO strings) for the next BOOKING_WINDOW_DAYS days.
-  function computeSlots(avail, hostTz, duration, busy) {
+  // Slots step by duration + buffer, and stay `buffer` minutes clear of existing bookings.
+  function computeSlots(avail, hostTz, duration, buffer, busy) {
     const now = DateTime.now().plus({ minutes: MIN_NOTICE_MIN });
     const busyMs = busy.map((b) => [Date.parse(b.start_at), Date.parse(b.end_at)]);
     const slots = [];
@@ -478,9 +483,9 @@
         const [eh, em] = w.end_time.split(":").map(Number);
         let s = day.set({ hour: sh, minute: sm });
         const end = eh === 23 && em === 59 ? day.plus({ days: 1 }) : day.set({ hour: eh, minute: em });
-        for (; s.plus({ minutes: duration }) <= end; s = s.plus({ minutes: duration })) {
+        for (; s.plus({ minutes: duration }) <= end; s = s.plus({ minutes: duration + buffer })) {
           if (s < now) continue;
-          const a = s.toMillis(), b = a + duration * 60000;
+          const a = s.toMillis() - buffer * 60000, b = s.toMillis() + (duration + buffer) * 60000;
           if (busyMs.some(([x, y]) => a < y && b > x)) continue;
           slots.push(s.toUTC().toISO());
         }
@@ -497,7 +502,7 @@
     const from = new Date().toISOString();
     const to = DateTime.now().plus({ days: BOOKING_WINDOW_DAYS + 2 }).toUTC().toISO();
     const busy = must(await sb.rpc("get_busy", { p_host: host.id, p_from: from, p_to: to }));
-    const slots = computeSlots(avail, host.timezone, ev.duration_min, busy);
+    const slots = computeSlots(avail, host.timezone, ev.duration_min, ev.buffer_min ?? 0, busy);
 
     let viewTz = guessTz();
     let month = null, selDay = null;

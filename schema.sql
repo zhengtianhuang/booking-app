@@ -19,11 +19,15 @@ create table if not exists public.event_types (
   title        text not null,
   description  text not null default '',
   duration_min int  not null check (duration_min between 5 and 480),
+  buffer_min   int  not null default 10 check (buffer_min between 0 and 120), -- gap kept free around each booking
   location     text not null default '',
   active       boolean not null default true,
   created_at   timestamptz not null default now(),
   unique (user_id, slug)
 );
+-- added 2026-10-21; for databases created before buffer_min existed
+alter table public.event_types add column if not exists buffer_min int not null default 10
+  check (buffer_min between 0 and 120);
 
 -- Weekly hours, in the host's own timezone. weekday: 0 = Sunday … 6 = Saturday.
 create table if not exists public.availability (
@@ -141,6 +145,18 @@ begin
                else a.end_time >= l_end::time end
   ) then
     raise exception 'SLOT_OUTSIDE_HOURS';
+  end if;
+
+  -- Keep buffer_min free on both sides of every booking. The exclusion constraint only
+  -- stops true overlaps, so serialize per host to make this check race-free.
+  perform pg_advisory_xact_lock(hashtext(et.user_id::text));
+  if et.buffer_min > 0 and exists (
+    select 1 from bookings b
+    where b.host_id = et.user_id and b.status = 'confirmed'
+      and b.start_at < v_end + make_interval(mins => et.buffer_min)
+      and b.end_at   > p_start - make_interval(mins => et.buffer_min)
+  ) then
+    raise exception 'SLOT_TAKEN';
   end if;
 
   begin
