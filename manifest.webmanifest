@@ -1,6 +1,6 @@
 {
-  "name": "Kee's Japanese Class",
-  "short_name": "Kee's Class",
+  "name": "Slotly 預約",
+  "short_name": "Slotly",
   "description": "Free scheduling — share a link, let people book a time with you.",
   "start_url": "./",
   "scope": "./",
