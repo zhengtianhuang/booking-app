@@ -1,7 +1,7 @@
 // Makes Slotly installable and lets the app shell open offline.
 // Supabase API calls are never cached: bookings must always be live.
-const CACHE = "slotly-v8";
-const SHELL = ["./", "index.html", "style.css?v=8", "config.js?v=8", "app.js?v=8", "manifest.webmanifest", "icons/icon-192.png"];
+const CACHE = "slotly-v9";
+const SHELL = ["./", "index.html", "style.css?v=9", "config.js?v=9", "app.js?v=9", "manifest.webmanifest", "icons/icon-192.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

@@ -66,11 +66,44 @@ create table if not exists public.bookings (
 alter table public.bookings add column if not exists price numeric(10,2);
 alter table public.bookings add column if not exists currency text;
 
+-- added 2026-10-23: private price links. Each link shows a chosen set of event types with its
+-- own price/currency (e.g. one link in TWD for Taiwan, one in AUD). The token is random, so a
+-- link can't be guessed; there is no public read policy — invitees go through get_price_link().
+create table if not exists public.price_links (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  token      text unique not null default substr(md5(gen_random_uuid()::text), 1, 12),
+  name       text not null,                -- host-only label, never shown to invitees
+  created_at timestamptz not null default now()
+);
+create table if not exists public.price_link_items (
+  link_id       uuid not null references public.price_links(id) on delete cascade,
+  event_type_id uuid not null references public.event_types(id) on delete cascade,
+  price         numeric(10,2) check (price >= 0),   -- null = free
+  currency      text not null default 'AUD' check (currency ~ '^[A-Z]{3}$'),
+  primary key (link_id, event_type_id)
+);
+-- false = hidden from the public page; bookable only through a price link
+alter table public.event_types add column if not exists listed boolean not null default true;
+alter table public.bookings add column if not exists price_link_id uuid
+  references public.price_links(id) on delete set null;
+
 -- ---------- row level security ----------
 alter table public.profiles     enable row level security;
 alter table public.event_types  enable row level security;
 alter table public.availability enable row level security;
 alter table public.bookings     enable row level security;
+alter table public.price_links      enable row level security;
+alter table public.price_link_items enable row level security;
+
+drop policy if exists "price_links own" on public.price_links;
+create policy "price_links own" on public.price_links for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "price_link_items own" on public.price_link_items;
+create policy "price_link_items own" on public.price_link_items for all
+  using (exists (select 1 from price_links l where l.id = link_id and l.user_id = auth.uid()))
+  with check (exists (select 1 from price_links l join event_types e on e.user_id = l.user_id
+                      where l.id = link_id and e.id = event_type_id and l.user_id = auth.uid()));
 
 drop policy if exists "profiles public read" on public.profiles;
 drop policy if exists "profiles own write"   on public.profiles;
@@ -112,11 +145,25 @@ language sql stable security definer set search_path = public as $$
     and b.end_at > p_from;
 $$;
 
+-- Public view of one price link: the host and the link's active event types at the link's prices.
+create or replace function public.get_price_link(p_token text)
+returns jsonb language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'host', jsonb_build_object('id', p.id, 'username', p.username, 'display_name', p.display_name, 'timezone', p.timezone),
+    'events', coalesce((
+      select jsonb_agg(to_jsonb(e) || jsonb_build_object('price', i.price, 'currency', i.currency) order by e.created_at)
+      from price_link_items i join event_types e on e.id = i.event_type_id
+      where i.link_id = l.id and e.active), '[]'::jsonb))
+  from price_links l join profiles p on p.id = l.user_id
+  where l.token = p_token;
+$$;
+
 -- Books a slot after re-checking everything server side, so a modified client can't
 -- book outside the host's hours, in the past, or on top of another booking.
+drop function if exists public.book_slot(uuid, timestamptz, text, text, text);
 create or replace function public.book_slot(
   p_event_type uuid, p_start timestamptz,
-  p_name text, p_email text, p_note text default ''
+  p_name text, p_email text, p_note text default '', p_link text default null
 ) returns uuid
 language plpgsql security definer set search_path = public as $$
 declare
@@ -126,9 +173,20 @@ declare
   l_start timestamp;
   l_end   timestamp;
   v_id    uuid;
+  v_link  uuid;
 begin
   select * into et from event_types where id = p_event_type and active;
   if not found then raise exception 'EVENT_NOT_FOUND'; end if;
+  -- The price always comes from the server: the link's price if booked through a link,
+  -- otherwise the event type's own price (and unlisted event types need a link).
+  if p_link is not null then
+    select l.id, i.price, i.currency into v_link, et.price, et.currency
+    from price_links l join price_link_items i on i.link_id = l.id
+    where l.token = p_link and i.event_type_id = et.id;
+    if v_link is null then raise exception 'EVENT_NOT_FOUND'; end if;
+  elsif not et.listed then
+    raise exception 'EVENT_NOT_FOUND';
+  end if;
 
   if coalesce(trim(p_name), '') = '' or p_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then
     raise exception 'INVALID_INVITEE';
@@ -169,8 +227,8 @@ begin
   end if;
 
   begin
-    insert into bookings (event_type_id, host_id, start_at, end_at, invitee_name, invitee_email, note, price, currency)
-    values (et.id, et.user_id, p_start, v_end, trim(p_name), lower(trim(p_email)), coalesce(p_note, ''), et.price, et.currency)
+    insert into bookings (event_type_id, host_id, start_at, end_at, invitee_name, invitee_email, note, price, currency, price_link_id)
+    values (et.id, et.user_id, p_start, v_end, trim(p_name), lower(trim(p_email)), coalesce(p_note, ''), et.price, et.currency, v_link)
     returning id into v_id;
   exception when exclusion_violation then
     raise exception 'SLOT_TAKEN';
@@ -180,7 +238,8 @@ end;
 $$;
 
 grant execute on function public.get_busy(uuid, timestamptz, timestamptz) to anon, authenticated;
-grant execute on function public.book_slot(uuid, timestamptz, text, text, text) to anon, authenticated;
+grant execute on function public.book_slot(uuid, timestamptz, text, text, text, text) to anon, authenticated;
+grant execute on function public.get_price_link(text) to anon, authenticated;
 
 -- Explicit table grants (RLS above still decides which rows), so this doesn't depend
 -- on the project's "automatically expose new tables" setting.
@@ -188,3 +247,4 @@ grant usage on schema public to anon, authenticated;
 grant select on public.profiles, public.event_types, public.availability to anon, authenticated;
 grant insert, update, delete on public.profiles, public.event_types, public.availability to authenticated;
 grant select, update on public.bookings to authenticated;
+grant select, insert, update, delete on public.price_links, public.price_link_items to authenticated;

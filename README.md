@@ -14,6 +14,7 @@
 - 預約者看到的是自己的時區，可以手動切換
 - 預約成功後可以「加到 Google 日曆」或下載 .ics
 - 後台看預約紀錄、取消預約
+- **專屬連結**（後台「專屬連結」分頁）：每個連結可以選要顯示哪些預約類型、用不同幣別和價格，例如台灣學生給 TWD 連結、澳洲學生給 AUD 連結。網址 `…/#/p/<隨機代碼>`，猜不到；價格由伺服器決定，改網頁也改不了價。預約類型取消勾選「顯示在公開預約頁」就只能透過專屬連結預約
 - 中文 / English 切換
 
 ## 設定步驟（第一次）
@@ -56,6 +57,7 @@ cd ~/Desktop/booking-app && python3 -m http.server 8000
 - 預約範圍固定是未來 60 天，最少要提前 5 分鐘。
 
 ## 狀態
+- 2026-10-23：加專屬連結（price_links / price_link_items、get_price_link()、book_slot 多一個 p_link 參數）。schema.sql 已在 Supabase 重跑，後端 7 項測試（rollback）+ 畫面都確認過。
 - 2026-10-20：Supabase 專案 `booking-app`（stkwjmhkcnpxlunghipr，Seoul）已建立、schema 已執行、Site URL / Redirect 已設、Email 驗證已關。
 - 後端 22 項測試全過（重複預約、超出時段、過去時間、隱私 RLS、取消後可再訂）；公開預約頁畫面確認正常。
 - 測試資料：使用者 `test-520f17` 和兩個 slotly-test-…@example.com 帳號，可在 Supabase → Authentication → Users 刪掉。

@@ -50,6 +50,11 @@
       notConfigured: "還沒設定 Supabase", notConfiguredBody: "請照 README.md 建立免費的 Supabase 專案，再把網址和 anon key 填進 config.js。",
       usernameTaken: "這個網址名稱已經有人用了", slugTaken: "你已經有一樣網址代號的預約類型",
       invitee: "預約人", lang: "EN",
+      links: "專屬連結", newLink: "+ 新增專屬連結", editLink: "編輯專屬連結", linkName: "連結名稱（只有你看得到）",
+      linkNameHint: "例如：台灣學生 TWD、澳洲學生 AUD", linkItems: "這個連結要顯示的預約類型和價格",
+      linkHint: "每個連結可以有不同的幣別和價格。連結網址是隨機的，別人猜不到；只有拿到連結的人看得到這些價格。",
+      noLinks: "還沒有專屬連結", pickOne: "至少要勾選一個預約類型", confirmDeleteLink: "確定要刪除這個連結？已經拿到連結的人就不能再用了。",
+      listed: "顯示在公開預約頁", listedHint: "取消勾選 = 只能透過專屬連結預約", hidden: "只限專屬連結", via: "連結",
     },
     en: {
       login: "Log in", signup: "Sign up", logout: "Log out", dashboard: "Dashboard", email: "Email", password: "Password",
@@ -78,6 +83,11 @@
       notConfigured: "Supabase not configured", notConfiguredBody: "Follow README.md to create a free Supabase project, then put its URL and anon key in config.js.",
       usernameTaken: "That username is taken", slugTaken: "You already have an event type with that slug",
       invitee: "Invitee", lang: "中文",
+      links: "Price links", newLink: "+ New price link", editLink: "Edit price link", linkName: "Link name (only you see this)",
+      linkNameHint: "e.g. Taiwan students TWD, Australia AUD", linkItems: "Event types and prices on this link",
+      linkHint: "Each link can use its own currency and prices. The URL is random and can't be guessed — only people you send it to see these prices.",
+      noLinks: "No price links yet", pickOne: "Pick at least one event type", confirmDeleteLink: "Delete this link? Anyone who has it won't be able to use it.",
+      listed: "Show on public booking page", listedHint: "Unticked = bookable only through a price link", hidden: "Links only", via: "Link",
     },
   };
   let lang = (() => {
@@ -97,6 +107,7 @@
   const allTimezones = () => (Intl.supportedValuesOf ? Intl.supportedValuesOf("timeZone") : [guessTz()]);
   const baseUrl = () => location.origin + location.pathname;
   const pageUrl = (username, slug) => `${baseUrl()}#/u/${username}${slug ? "/" + slug : ""}`;
+  const linkUrl = (token) => `${baseUrl()}#/p/${token}`;
   const locale = () => (lang === "zh" ? "zh-TW" : "en-AU");
   const fmtDur = (m) => (m % 60 === 0 ? `${m / 60} h` : m > 60 ? `${Math.floor(m / 60)} h ${m % 60} ${t("minutes")}` : `${m} ${t("minutes")}`);
   const fmtPrice = (price, cur) => {
@@ -169,6 +180,7 @@
     try {
       if (parts[0] === "u" && parts[1] && parts[2]) return await viewBook(parts[1], parts[2]);
       if (parts[0] === "u" && parts[1]) return await viewPublicProfile(parts[1]);
+      if (parts[0] === "p" && parts[1]) return await viewPriceLink(parts[1], parts[2]);
       if (parts[0] === "login") return viewAuth("login");
       if (parts[0] === "signup") return viewAuth("signup");
       if (!session) return viewAuth("login");
@@ -261,7 +273,7 @@
 
   // ---------- dashboard ----------
   async function viewDashboard(tab) {
-    const tabs = ["events", "availability", "bookings", "profile"];
+    const tabs = ["events", "links", "availability", "bookings", "profile"];
     if (!tabs.includes(tab)) tab = "events";
     $app.innerHTML = `
       <div class="row spread"><div><h1>${esc(me.display_name || me.username)}</h1>
@@ -271,7 +283,7 @@
       <section id="tab"></section>`;
     document.getElementById("copyMain").onclick = () => copy(pageUrl(me.username));
     const $tab = document.getElementById("tab");
-    await { events: tabEvents, availability: tabAvailability, bookings: tabBookings, profile: tabProfile }[tab]($tab);
+    await { events: tabEvents, links: tabLinks, availability: tabAvailability, bookings: tabBookings, profile: tabProfile }[tab]($tab);
   }
 
   async function tabEvents($tab) {
@@ -281,7 +293,7 @@
         <div class="row spread"><h2>${t("events")}</h2><button class="btn-small" id="newEv">${t("newEvent")}</button></div>
         ${rows.length ? rows.map((r) => `
           <div class="list-item">
-            <div><strong>${esc(r.title)}</strong> <span class="pill ${r.active ? "" : "off"}">${r.active ? `${fmtDur(r.duration_min)} · ${esc(fmtPrice(r.price, r.currency))}` : t("off")}</span>
+            <div><strong>${esc(r.title)}</strong> <span class="pill ${r.active ? "" : "off"}">${r.active ? `${fmtDur(r.duration_min)} · ${esc(fmtPrice(r.price, r.currency))}` : t("off")}</span>${r.listed === false ? ` <span class="pill off">${t("hidden")}</span>` : ""}
               <div class="muted small">/${esc(me.username)}/${esc(r.slug)}</div></div>
             <div class="row">
               <button class="btn-ghost btn-small" data-copy="${esc(r.slug)}">${t("copyLink")}</button>
@@ -296,7 +308,7 @@
 
     function eventForm(ev) {
       const $f = document.getElementById("evForm");
-      const d = ev || { title: "", slug: "", duration_min: 30, buffer_min: 10, price: null, currency: "AUD", description: "", location: "", active: true };
+      const d = ev || { title: "", slug: "", duration_min: 30, buffer_min: 10, price: null, currency: "AUD", description: "", location: "", active: true, listed: true };
       $f.innerHTML = `
         <form class="card" id="ef">
           <h2>${ev ? t("editEvent") : t("newEvent").replace("+ ", "")}</h2>
@@ -320,6 +332,8 @@
           <label>${t("location")}</label><input name="location" value="${esc(d.location)}">
           <label>${t("description")}</label><textarea name="description">${esc(d.description)}</textarea>
           <label class="row"><input type="checkbox" name="active" style="width:auto" ${d.active ? "checked" : ""}> ${t("active")}</label>
+          <label class="row"><input type="checkbox" name="listed" style="width:auto" ${d.listed !== false ? "checked" : ""}> ${t("listed")}</label>
+          <div class="hint">${t("listedHint")}</div>
           <div class="row spread" style="margin-top:16px">
             <div class="row"><button type="submit">${t("save")}</button><button type="button" class="btn-ghost" id="efCancel">${t("cancel")}</button></div>
             ${ev ? `<button type="button" class="btn-danger" id="efDel">${t("delete")}</button>` : ""}
@@ -343,12 +357,94 @@
           user_id: me.id, title: f.get("title"), slug: f.get("slug").toLowerCase(),
           duration_min: +f.get("duration_min"), buffer_min: +f.get("buffer_min"), location: f.get("location"),
           price: f.get("price") === "" ? null : +f.get("price"), currency: f.get("currency"),
-          description: f.get("description"), active: f.get("active") === "on",
+          description: f.get("description"), active: f.get("active") === "on", listed: f.get("listed") === "on",
         };
         const { error } = ev ? await sb.from("event_types").update(row).eq("id", ev.id) : await sb.from("event_types").insert(row);
         if (error) return toast(error.code === "23505" ? t("slugTaken") : errMsg(error), true);
         toast(t("saved"));
         tabEvents($tab);
+      };
+      form.scrollIntoView({ behavior: "smooth" });
+    }
+  }
+
+  async function tabLinks($tab) {
+    const [links, evs] = await Promise.all([
+      sb.from("price_links").select("*, price_link_items(*)").eq("user_id", me.id).order("created_at").then(must),
+      sb.from("event_types").select("*").eq("user_id", me.id).order("created_at").then(must),
+    ]);
+    const evTitle = (id) => evs.find((e) => e.id === id)?.title || "?";
+    $tab.innerHTML = `
+      <div class="card">
+        <div class="row spread"><h2>${t("links")}</h2><button class="btn-small" id="newLk">${t("newLink")}</button></div>
+        <p class="muted small">${t("linkHint")}</p>
+        ${links.length ? links.map((l) => `
+          <div class="list-item">
+            <div><strong>${esc(l.name)}</strong>
+              <div class="small">${l.price_link_items.map((i) => `${esc(evTitle(i.event_type_id))} <span class="pill">${esc(fmtPrice(i.price, i.currency))}</span>`).join(" ")}</div>
+              <div class="muted small"><code class="link">${esc(linkUrl(l.token))}</code></div></div>
+            <div class="row">
+              <button class="btn-ghost btn-small" data-copy="${esc(l.token)}">${t("copyLink")}</button>
+              <button class="btn-ghost btn-small" data-edit="${esc(l.id)}">${t("edit")}</button>
+            </div>
+          </div>`).join("") : `<div class="empty">${t("noLinks")}</div>`}
+      </div>
+      <div id="lkForm"></div>`;
+    $tab.querySelector("#newLk").onclick = () => linkForm(null);
+    $tab.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = () => copy(linkUrl(b.dataset.copy))));
+    $tab.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => linkForm(links.find((l) => l.id === b.dataset.edit))));
+
+    function linkForm(lk) {
+      const $f = document.getElementById("lkForm");
+      const items = new Map((lk?.price_link_items || []).map((i) => [i.event_type_id, i]));
+      $f.innerHTML = `
+        <form class="card" id="lf">
+          <h2>${lk ? t("editLink") : t("newLink").replace("+ ", "")}</h2>
+          <label>${t("linkName")}</label><input name="name" required value="${esc(lk?.name || "")}">
+          <div class="hint">${t("linkNameHint")}</div>
+          <label>${t("linkItems")}</label>
+          ${evs.length ? evs.map((e) => {
+            const it = items.get(e.id);
+            const cur = it ? it.currency : e.currency;
+            const price = it ? it.price : e.price;
+            return `
+            <div class="list-item" data-ev="${esc(e.id)}">
+              <label class="row link-ev"><input type="checkbox" class="inc" style="width:auto" ${it || !lk ? "checked" : ""}>
+                <span><strong>${esc(e.title)}</strong> <span class="muted small">${fmtDur(e.duration_min)}${e.active ? "" : " · " + t("off")}</span></span></label>
+              <div class="row" style="flex-wrap:nowrap">
+                <select class="cur" style="width:100px">${[...new Set([...CURRENCIES, cur])].map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+                <input class="pr" type="number" min="0" step="0.01" inputmode="decimal" placeholder="${t("free")}" value="${price ?? ""}" style="width:120px">
+              </div>
+            </div>`;
+          }).join("") : `<div class="empty">${t("noEvents")}</div>`}
+          <div class="row spread" style="margin-top:16px">
+            <div class="row"><button type="submit">${t("save")}</button><button type="button" class="btn-ghost" id="lfCancel">${t("cancel")}</button></div>
+            ${lk ? `<button type="button" class="btn-danger" id="lfDel">${t("delete")}</button>` : ""}
+          </div>
+        </form>`;
+      const form = $f.querySelector("#lf");
+      form.querySelector("#lfCancel").onclick = () => ($f.innerHTML = "");
+      if (lk) form.querySelector("#lfDel").onclick = async () => {
+        if (!confirm(t("confirmDeleteLink"))) return;
+        try { must(await sb.from("price_links").delete().eq("id", lk.id)); tabLinks($tab); }
+        catch (err) { toast(errMsg(err), true); }
+      };
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const rows = [...form.querySelectorAll("[data-ev]")].filter((r) => r.querySelector(".inc").checked).map((r) => ({
+          event_type_id: r.dataset.ev, currency: r.querySelector(".cur").value,
+          price: r.querySelector(".pr").value === "" ? null : +r.querySelector(".pr").value,
+        }));
+        if (!rows.length) return toast(t("pickOne"), true);
+        try {
+          const name = form.elements.name.value.trim();
+          const id = lk ? lk.id : must(await sb.from("price_links").insert({ user_id: me.id, name }).select("id").single()).id;
+          if (lk) must(await sb.from("price_links").update({ name }).eq("id", id));
+          must(await sb.from("price_link_items").delete().eq("link_id", id));
+          must(await sb.from("price_link_items").insert(rows.map((r) => ({ ...r, link_id: id }))));
+          toast(t("saved"));
+          tabLinks($tab);
+        } catch (err) { toast(errMsg(err), true); }
       };
       form.scrollIntoView({ behavior: "smooth" });
     }
@@ -421,14 +517,14 @@
   }
 
   async function tabBookings($tab) {
-    const rows = must(await sb.from("bookings").select("*, event_types(title)").eq("host_id", me.id).order("start_at"));
+    const rows = must(await sb.from("bookings").select("*, event_types(title), price_links(name)").eq("host_id", me.id).order("start_at"));
     const now = new Date().toISOString();
     const upcoming = rows.filter((r) => r.status === "confirmed" && r.end_at >= now);
     const past = rows.filter((r) => !(r.status === "confirmed" && r.end_at >= now)).reverse();
     const fmt = (iso) => DateTime.fromISO(iso).setZone(me.timezone).setLocale(locale()).toFormat("ccc, d LLL yyyy · HH:mm");
     const item = (r, canCancel) => `
       <div class="list-item">
-        <div><strong>${esc(fmt(r.start_at))}</strong> <span class="pill ${r.status === "cancelled" ? "off" : ""}">${esc(r.event_types?.title || "")}${r.price != null ? " · " + esc(fmtPrice(r.price, r.currency)) : ""}${r.status === "cancelled" ? " · " + t("cancelled") : ""}</span>
+        <div><strong>${esc(fmt(r.start_at))}</strong> <span class="pill ${r.status === "cancelled" ? "off" : ""}">${esc(r.event_types?.title || "")}${r.price != null ? " · " + esc(fmtPrice(r.price, r.currency)) : ""}${r.status === "cancelled" ? " · " + t("cancelled") : ""}</span>${r.price_links ? ` <span class="pill">${t("via")}: ${esc(r.price_links.name)}</span>` : ""}
           <div class="small">${t("invitee")}: ${esc(r.invitee_name)} · <a href="mailto:${esc(r.invitee_email)}">${esc(r.invitee_email)}</a></div>
           ${r.note ? `<div class="muted small">“${esc(r.note)}”</div>` : ""}</div>
         ${canCancel ? `<button class="btn-danger btn-small" data-cancel="${esc(r.id)}">${t("cancelBooking")}</button>` : ""}
@@ -475,11 +571,25 @@
   async function viewPublicProfile(username) {
     const host = await fetchHost(username);
     if (!host) { $app.innerHTML = `<div class="card center">${t("notFound")}</div>`; return; }
-    const evs = must(await sb.from("event_types").select("*").eq("user_id", host.id).eq("active", true).order("created_at"));
+    const evs = must(await sb.from("event_types").select("*").eq("user_id", host.id).eq("active", true).eq("listed", true).order("created_at"));
+    renderEventList(host, evs, `#/u/${encodeURIComponent(host.username)}`);
+  }
+
+  // Price link page: same layout as the public page, but with the link's own prices.
+  async function viewPriceLink(token, slug) {
+    const data = must(await sb.rpc("get_price_link", { p_token: token }));
+    const ev = data && slug && data.events.find((e) => e.slug === slug);
+    if (!data || (slug && !ev)) { $app.innerHTML = `<div class="card center">${t("notFound")}</div>`; return; }
+    const base = `#/p/${encodeURIComponent(token)}`;
+    if (ev) return bookingPage(data.host, ev, { link: token, back: base });
+    renderEventList(data.host, data.events, base);
+  }
+
+  function renderEventList(host, evs, base) {
     $app.innerHTML = `
       <div class="card narrow center"><h1>${esc(host.display_name || host.username)}</h1></div>
       <div class="narrow">${evs.length ? evs.map((e) => `
-        <a class="card" style="display:block;color:inherit" href="#/u/${encodeURIComponent(host.username)}/${encodeURIComponent(e.slug)}">
+        <a class="card" style="display:block;color:inherit" href="${base}/${encodeURIComponent(e.slug)}">
           <strong>${esc(e.title)}</strong> <span class="pill">${fmtDur(e.duration_min)} · ${esc(fmtPrice(e.price, e.currency))}</span>
           ${e.description ? `<p class="muted small" style="margin:6px 0 0">${esc(e.description)}</p>` : ""}
         </a>`).join("") : `<div class="card empty">${t("noEvents")}</div>`}</div>`;
@@ -513,7 +623,11 @@
   async function viewBook(username, slug) {
     const host = await fetchHost(username);
     const ev = host && must(await sb.from("event_types").select("*").eq("user_id", host.id).eq("slug", slug).eq("active", true).maybeSingle());
-    if (!ev) { $app.innerHTML = `<div class="card center">${t("notFound")}</div>`; return; }
+    if (!ev || ev.listed === false) { $app.innerHTML = `<div class="card center">${t("notFound")}</div>`; return; }
+    return bookingPage(host, ev, { link: null, back: `#/u/${encodeURIComponent(host.username)}` });
+  }
+
+  async function bookingPage(host, ev, { link, back }) {
     const avail = must(await sb.from("availability").select("weekday, start_time, end_time").eq("user_id", host.id));
     const from = new Date().toISOString();
     const to = DateTime.now().plus({ days: BOOKING_WINDOW_DAYS + 2 }).toUTC().toISO();
@@ -618,7 +732,7 @@
         btn.disabled = true;
         try {
           must(await sb.rpc("book_slot", {
-            p_event_type: ev.id, p_start: iso, p_name: f.get("name"), p_email: f.get("email"), p_note: f.get("note") || "",
+            p_event_type: ev.id, p_start: iso, p_name: f.get("name"), p_email: f.get("email"), p_note: f.get("note") || "", p_link: link,
           }));
           renderDone(iso);
         } catch (err) {
@@ -660,7 +774,7 @@
             <a class="btn" href="${gcal}" target="_blank" rel="noopener">${t("addGoogle")}</a>
             <a class="btn btn-ghost" href="${icsUrl}" download="booking.ics">${t("downloadIcs")}</a>
           </div>
-          <p class="small" style="margin-top:20px"><a href="#/u/${encodeURIComponent(host.username)}">${t("bookAnother")}</a></p>
+          <p class="small" style="margin-top:20px"><a href="${back}">${t("bookAnother")}</a></p>
         </div>`;
     }
 

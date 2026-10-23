@@ -56,6 +56,7 @@ label {
   letter-spacing: .02em; text-transform: uppercase; margin: 16px 0 6px;
 }
 .day-name, .day-name label { text-transform: none; letter-spacing: 0; }
+.link-ev { margin: 0; font-size: 1rem; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 600; }
 input, select, textarea {
   width: 100%; padding: 12px 14px; font: inherit; font-weight: 700; color: var(--ink);
   background: #fff; border: 2px solid var(--card-line); border-radius: 12px;
