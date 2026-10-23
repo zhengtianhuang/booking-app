@@ -3,5 +3,7 @@
 // in schema.sql is what actually protects the data. Never put the service_role key here.
 window.SLOTLY_CONFIG = {
   SUPABASE_URL: "https://stkwjmhkcnpxlunghipr.supabase.co",
+  // Google OAuth client (public by design; the secret lives only in Supabase private.settings).
+  GOOGLE_CLIENT_ID: "772735132542-64kjfsoo59lulgbr1i5bfqceh2l5omgo.apps.googleusercontent.com",
   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN0a3dqbWhrY25weGx1bmdoaXByIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0NzAxMDAsImV4cCI6MjEwODA0NjEwMH0.RZN8ipxEO-YyeJDNsFrYm7RREeul_DxVdKddT6jDGYk",
 };

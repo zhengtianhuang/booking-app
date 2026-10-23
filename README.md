@@ -51,6 +51,14 @@ cd ~/Desktop/booking-app && python3 -m http.server 8000
 - 除錯：SQL Editor 跑 `select * from net._http_response order by created desc limit 5;`
 - 改 Code.gs 後要「部署 → 管理部署作業 → 編輯 → 新版本」才會生效
 
+## Google 日曆 + Meet（每筆預約一個新 Meet）
+主人在「個人設定」按「連結 Google 帳號」→ 之後每筆預約都會在**主人自己的 Google 日曆**建活動、附新的 Meet 連結，連結寫進 bookings.meet_url，並出現在確認信、預約成功頁、預約紀錄。取消預約會刪掉日曆活動。
+- 流程：trigger → pg_net → Edge Function `google`（`supabase/functions/google/index.ts`，Verify JWT 關閉）→ Google Calendar API → 轉給 Apps Script 寄信
+- Google Cloud：專案「Slotly」（graphite-dynamo-512511-b5，帳號 zhengtian0629）、OAuth client「網路用戶端 1」，權限 openid/email/calendar.events，redirect URI = `https://stkwjmhkcnpxlunghipr.supabase.co/functions/v1/google`
+- Client ID 在 config.js（公開）；Client secret 只存在 Supabase `private.settings.google_client_secret`
+- 應用程式未經 Google 審核：授權畫面會出現「未經驗證」，按「進階 → 前往」；上限 100 位使用者。必須是「正式版」，測試版的授權 7 天就失效
+- `google.sql` 建表格與 RPC；最後一步把 `private.settings.webhook_url` 改成 Edge Function 網址（原 Apps Script 網址存到 `apps_script_url`）
+
 ## 目前限制 / 之後可以加
 - 沒有同步 Google 日曆的忙碌時間（需要 OAuth，比較複雜）。
 - 一個時段只能一個人訂（沒有「一堂課 10 個名額」）。之後如果要給 1010dance 開課用，可以再加。
