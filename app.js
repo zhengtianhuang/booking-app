@@ -50,6 +50,10 @@
       notConfigured: "還沒設定 Supabase", notConfiguredBody: "請照 README.md 建立免費的 Supabase 專案，再把網址和 anon key 填進 config.js。",
       usernameTaken: "這個網址名稱已經有人用了", slugTaken: "你已經有一樣網址代號的預約類型",
       invitee: "預約人", lang: "EN",
+      gTitle: "Google 日曆 + Meet", gHint: "連結後，每筆新預約都會自動加到你的 Google 日曆，並產生一個新的 Google Meet 連結，寄給你和預約人。",
+      gConnect: "連結 Google 帳號", gConnected: "已連結：", gDisconnect: "取消連結", gOk: "Google 帳號已連結", gErr: "Google 連結失敗，請再試一次",
+      gWarn: "Google 會顯示「這個應用程式未經驗證」，按「進階」→「前往」即可。", confirmDisconnect: "取消連結後，新預約就不會自動建立 Meet。確定嗎？",
+      meetSoon: "Meet 連結產生中…", meetEmail: "Meet 連結會寄到你的信箱",
       links: "專屬連結", newLink: "+ 新增專屬連結", editLink: "編輯專屬連結", linkName: "連結名稱（只有你看得到）",
       linkNameHint: "例如：台灣學生 TWD、澳洲學生 AUD", linkItems: "這個連結要顯示的預約類型和價格", linkCurrency: "這個連結顯示的幣別", convert: "依今天匯率換算", converted: "已依今天匯率換算，價格可以再自己改", original: "原價",
       linkHint: "每個連結可以有不同的幣別和價格。連結網址是隨機的，別人猜不到；只有拿到連結的人看得到這些價格。",
@@ -83,6 +87,10 @@
       notConfigured: "Supabase not configured", notConfiguredBody: "Follow README.md to create a free Supabase project, then put its URL and anon key in config.js.",
       usernameTaken: "That username is taken", slugTaken: "You already have an event type with that slug",
       invitee: "Invitee", lang: "中文",
+      gTitle: "Google Calendar + Meet", gHint: "Once connected, every new booking is added to your Google Calendar with its own Google Meet link, emailed to you and the invitee.",
+      gConnect: "Connect Google account", gConnected: "Connected: ", gDisconnect: "Disconnect", gOk: "Google account connected", gErr: "Couldn't connect Google — please try again",
+      gWarn: "Google will say the app isn't verified — click Advanced → Go to continue.", confirmDisconnect: "New bookings won't get a Meet link after disconnecting. Continue?",
+      meetSoon: "Creating Meet link…", meetEmail: "The Meet link will be emailed to you",
       links: "Price links", newLink: "+ New price link", editLink: "Edit price link", linkName: "Link name (only you see this)",
       linkNameHint: "e.g. Taiwan students TWD, Australia AUD", linkItems: "Event types and prices on this link", linkCurrency: "Currency shown on this link", convert: "Convert at today's rate", converted: "Converted at today's rate — edit as you like", original: "Base",
       linkHint: "Each link can use its own currency and prices. The URL is random and can't be guessed — only people you send it to see these prices.",
@@ -284,6 +292,9 @@
     document.getElementById("copyMain").onclick = () => copy(pageUrl(me.username));
     const $tab = document.getElementById("tab");
     await { events: tabEvents, links: tabLinks, availability: tabAvailability, bookings: tabBookings, profile: tabProfile }[tab]($tab);
+    // Back from Google's sign-in (the Edge Function redirects to ?google=connected|error).
+    const g = new URLSearchParams(location.search).get("google");
+    if (g) { toast(g === "connected" ? t("gOk") : t("gErr"), g !== "connected"); history.replaceState(null, "", location.pathname + location.hash); }
   }
 
   async function tabEvents($tab) {
@@ -548,6 +559,7 @@
       <div class="list-item">
         <div><strong>${esc(fmt(r.start_at))}</strong> <span class="pill ${r.status === "cancelled" ? "off" : ""}">${esc(r.event_types?.title || "")}${r.price != null ? " · " + esc(fmtPrice(r.price, r.currency)) : ""}${r.status === "cancelled" ? " · " + t("cancelled") : ""}</span>${r.price_links ? ` <span class="pill">${t("via")}: ${esc(r.price_links.name)}</span>` : ""}
           <div class="small">${t("invitee")}: ${esc(r.invitee_name)} · <a href="mailto:${esc(r.invitee_email)}">${esc(r.invitee_email)}</a></div>
+          ${r.meet_url ? `<div class="small">🎥 <a href="${esc(r.meet_url)}" target="_blank" rel="noopener">${esc(r.meet_url)}</a></div>` : ""}
           ${r.note ? `<div class="muted small">“${esc(r.note)}”</div>` : ""}</div>
         ${canCancel ? `<button class="btn-danger btn-small" data-cancel="${esc(r.id)}">${t("cancelBooking")}</button>` : ""}
       </div>`;
@@ -561,7 +573,9 @@
     }));
   }
 
-  function tabProfile($tab) {
+  async function tabProfile($tab) {
+    const gOn = !!cfg.GOOGLE_CLIENT_ID;
+    const gEmail = gOn ? must(await sb.rpc("my_google")) : null;
     $tab.innerHTML = `
       <form class="card" id="pf">
         <h2>${t("profile")}</h2>
@@ -571,7 +585,28 @@
         <label>${t("timezone")}</label><select name="timezone">${tzOptions(me.timezone)}</select>
         <p class="muted small">${t("email")}: ${esc(session.user.email)}</p>
         <button class="btn-block" type="submit">${t("save")}</button>
-      </form>`;
+      </form>
+      ${gOn ? `<div class="card">
+        <h2>🎥 ${t("gTitle")}</h2>
+        <p class="muted small">${t("gHint")}</p>
+        ${gEmail
+          ? `<div class="row spread"><span>✅ ${t("gConnected")}<strong>${esc(gEmail)}</strong></span>
+              <button class="btn-ghost btn-small" id="gOff">${t("gDisconnect")}</button></div>`
+          : `<button class="btn-block" id="gOn">${t("gConnect")}</button><p class="hint">${t("gWarn")}</p>`}
+      </div>` : ""}`;
+    $tab.querySelector("#gOn")?.addEventListener("click", async () => {
+      try {
+        const state = must(await sb.rpc("google_oauth_state"));
+        location.href = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
+          client_id: cfg.GOOGLE_CLIENT_ID, redirect_uri: `${cfg.SUPABASE_URL}/functions/v1/google`, response_type: "code",
+          scope: "openid email https://www.googleapis.com/auth/calendar.events", access_type: "offline", prompt: "consent", state,
+        });
+      } catch (err) { toast(errMsg(err), true); }
+    });
+    $tab.querySelector("#gOff")?.addEventListener("click", async () => {
+      if (!confirm(t("confirmDisconnect"))) return;
+      try { must(await sb.rpc("google_disconnect")); tabProfile($tab); } catch (err) { toast(errMsg(err), true); }
+    });
     $tab.querySelector("#pf").onsubmit = async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -753,10 +788,10 @@
         const btn = e.target.querySelector("button[type=submit]");
         btn.disabled = true;
         try {
-          must(await sb.rpc("book_slot", {
+          const id = must(await sb.rpc("book_slot", {
             p_event_type: ev.id, p_start: iso, p_name: f.get("name"), p_email: f.get("email"), p_note: f.get("note") || "", p_link: link,
           }));
-          renderDone(iso);
+          renderDone(iso, id);
         } catch (err) {
           toast(errMsg(err), true);
           btn.disabled = false;
@@ -769,7 +804,7 @@
       };
     }
 
-    function renderDone(iso) {
+    function renderDone(iso, id) {
       const start = DateTime.fromISO(iso).toUTC();
       const end = start.plus({ minutes: ev.duration_min });
       const stamp = (d) => d.toFormat("yyyyLLdd'T'HHmmss'Z'");
@@ -792,12 +827,25 @@
           <p class="muted">${esc(t("bookedWith", { name }))}</p>
           <p><strong>${esc(ev.title)}</strong><br>${esc(slotLabel(iso))}<br>💲 ${esc(fmtPrice(ev.price, ev.currency))}</p>
           ${ev.location ? `<p>📍 ${esc(ev.location)}</p>` : ""}
+          <p id="meet" class="small muted"></p>
           <div class="row" style="justify-content:center">
             <a class="btn" href="${gcal}" target="_blank" rel="noopener">${t("addGoogle")}</a>
             <a class="btn btn-ghost" href="${icsUrl}" download="booking.ics">${t("downloadIcs")}</a>
           </div>
           <p class="small" style="margin-top:20px"><a href="${back}">${t("bookAnother")}</a></p>
         </div>`;
+      pollMeet(id);
+    }
+
+    // The Meet link is created a few seconds after booking (trigger → Edge Function), if the
+    // host has connected Google. Poll briefly; stay silent for hosts without Google.
+    async function pollMeet(id) {
+      const $m = document.getElementById("meet");
+      for (let i = 0; i < 8 && $m.isConnected; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const url = (await sb.rpc("booking_meet", { p_id: id })).data;
+        if (url) { $m.innerHTML = `🎥 <a href="${esc(url)}" target="_blank" rel="noopener"><strong>Google Meet</strong></a> · ${esc(url)}`; $m.className = "small"; return; }
+      }
     }
 
     renderPicker();

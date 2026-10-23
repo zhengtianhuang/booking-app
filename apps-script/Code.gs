@@ -6,6 +6,8 @@
  * Nothing is written to anyone's calendar automatically: host and invitee each get an
  * email with an "Add to Google Calendar" button and an .ics attachment.
  * Mail is sent from the Google account that owns this script (MailApp quota ~100/day).
+ * Since google.sql, the trigger calls the Supabase Edge Function "google" first; it adds
+ * meet_url when the host has connected Google Calendar, then forwards here.
  */
 const SECRET = "PASTE-SHARED-SECRET"; // must match private.settings.webhook_secret
 
@@ -29,6 +31,7 @@ function onBooked(d) {
   const rows = [
     ["時間 When", when],
     ["預約人 Invitee", d.invitee_name + " <" + d.invitee_email + ">"],
+    d.meet_url ? ["Google Meet", d.meet_url] : null,
     d.location ? ["地點 Location", d.location] : null,
     priceRow(d),
     d.note ? ["留言 Note", d.note] : null,
@@ -36,15 +39,17 @@ function onBooked(d) {
   MailApp.sendEmail({
     to: d.host_email,
     subject: "📅 新預約 New booking: " + d.invitee_name + " — " + when,
-    htmlBody: page("有人預約了你的「" + d.event_title + "」", rows, gcalLink(d, d.invitee_name)),
+    htmlBody: page("有人預約了你的「" + d.event_title + "」", rows, d.meet_url ? null : gcalLink(d, d.invitee_name),
+      d.meet_url ? "已經自動加到你的 Google 日曆。" : ""),
     replyTo: d.invitee_email,
-    attachments: [ics],
+    attachments: d.meet_url ? [] : [ics],
   });
   MailApp.sendEmail({
     to: d.invitee_email,
     subject: "✅ 預約成功 Booking confirmed: " + d.event_title + " — " + d.host_name,
     htmlBody: page("你已預約 " + d.host_name + " 的「" + d.event_title + "」",
-      [["時間 When", when], d.location ? ["地點 Location", d.location] : null, priceRow(d)], gcalLink(d, d.host_name)),
+      [["時間 When", when], d.meet_url ? ["Google Meet", d.meet_url] : null,
+       d.location ? ["地點 Location", d.location] : null, priceRow(d)], gcalLink(d, d.host_name)),
     replyTo: d.host_email,
     attachments: [ics],
   });
@@ -78,24 +83,26 @@ function gcalLink(d, other) {
     "&text=" + encodeURIComponent(d.event_title + " — " + other) +
     "&dates=" + stamp(d.start_at) + "/" + stamp(d.end_at) +
     "&details=" + encodeURIComponent(d.note || d.description || "") +
-    "&location=" + encodeURIComponent(d.location || "");
+    "&location=" + encodeURIComponent(d.meet_url || d.location || "");
 }
 
-function page(heading, rows, calUrl) {
+function page(heading, rows, calUrl, extra) {
   const esc = function (s) {
     return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; });
   };
   const body = rows.filter(Boolean).map(function (r) {
     return '<tr><td style="padding:6px 12px 6px 0;color:#6b7083;white-space:nowrap">' + esc(r[0]) +
-      '</td><td style="padding:6px 0">' + esc(r[1]) + "</td></tr>";
+      '</td><td style="padding:6px 0">' +
+      (/^https:\/\//.test(String(r[1])) ? '<a href="' + esc(r[1]) + '">' + esc(r[1]) + "</a>" : esc(r[1])) + "</td></tr>";
   }).join("");
   const button = calUrl
     ? '<p style="margin:20px 0"><a href="' + esc(calUrl) + '" style="background:#4f46e5;color:#fff;padding:10px 18px;' +
       'border-radius:8px;text-decoration:none;font-weight:600">加到 Google 日曆 Add to Google Calendar</a></p>' +
       '<p style="color:#6b7083;font-size:13px">也可以打開附件 booking.ics 加到其他日曆。</p>'
     : "";
+  const note = extra ? '<p style="color:#6b7083;font-size:13px">' + esc(extra) + "</p>" : "";
   return '<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:15px;color:#1c1f2a;max-width:520px">' +
-    '<h2 style="font-size:18px">' + esc(heading) + "</h2><table>" + body + "</table>" + button +
+    '<h2 style="font-size:18px">' + esc(heading) + "</h2><table>" + body + "</table>" + note + button +
     '<p style="color:#9a9eb3;font-size:12px;margin-top:24px">Sent by Slotly</p></div>';
 }
 
@@ -111,7 +118,7 @@ function icsFile(d, method) {
     "DTEND:" + stamp(d.end_at),
     "SUMMARY:" + esc(d.event_title + " — " + d.host_name + " & " + d.invitee_name),
     "DESCRIPTION:" + esc(d.note || d.description),
-    "LOCATION:" + esc(d.location),
+    "LOCATION:" + esc(d.meet_url || d.location),
     "END:VEVENT", "END:VCALENDAR",
   ];
   return Utilities.newBlob(lines.join("\r\n"), "text/calendar", "booking.ics");
