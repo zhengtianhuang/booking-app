@@ -51,7 +51,7 @@
       usernameTaken: "這個網址名稱已經有人用了", slugTaken: "你已經有一樣網址代號的預約類型",
       invitee: "預約人", lang: "EN",
       links: "專屬連結", newLink: "+ 新增專屬連結", editLink: "編輯專屬連結", linkName: "連結名稱（只有你看得到）",
-      linkNameHint: "例如：台灣學生 TWD、澳洲學生 AUD", linkItems: "這個連結要顯示的預約類型和價格",
+      linkNameHint: "例如：台灣學生 TWD、澳洲學生 AUD", linkItems: "這個連結要顯示的預約類型和價格", linkCurrency: "這個連結顯示的幣別", convert: "依今天匯率換算", converted: "已依今天匯率換算，價格可以再自己改", original: "原價",
       linkHint: "每個連結可以有不同的幣別和價格。連結網址是隨機的，別人猜不到；只有拿到連結的人看得到這些價格。",
       noLinks: "還沒有專屬連結", pickOne: "至少要勾選一個預約類型", confirmDeleteLink: "確定要刪除這個連結？已經拿到連結的人就不能再用了。",
       listed: "顯示在公開預約頁", listedHint: "取消勾選 = 只能透過專屬連結預約", hidden: "只限專屬連結", via: "連結",
@@ -84,7 +84,7 @@
       usernameTaken: "That username is taken", slugTaken: "You already have an event type with that slug",
       invitee: "Invitee", lang: "中文",
       links: "Price links", newLink: "+ New price link", editLink: "Edit price link", linkName: "Link name (only you see this)",
-      linkNameHint: "e.g. Taiwan students TWD, Australia AUD", linkItems: "Event types and prices on this link",
+      linkNameHint: "e.g. Taiwan students TWD, Australia AUD", linkItems: "Event types and prices on this link", linkCurrency: "Currency shown on this link", convert: "Convert at today's rate", converted: "Converted at today's rate — edit as you like", original: "Base",
       linkHint: "Each link can use its own currency and prices. The URL is random and can't be guessed — only people you send it to see these prices.",
       noLinks: "No price links yet", pickOne: "Pick at least one event type", confirmDeleteLink: "Delete this link? Anyone who has it won't be able to use it.",
       listed: "Show on public booking page", listedHint: "Unticked = bookable only through a price link", hidden: "Links only", via: "Link",
@@ -397,22 +397,27 @@
     function linkForm(lk) {
       const $f = document.getElementById("lkForm");
       const items = new Map((lk?.price_link_items || []).map((i) => [i.event_type_id, i]));
+      const linkCur = lk?.price_link_items[0]?.currency || evs[0]?.currency || "AUD";
       $f.innerHTML = `
         <form class="card" id="lf">
           <h2>${lk ? t("editLink") : t("newLink").replace("+ ", "")}</h2>
           <label>${t("linkName")}</label><input name="name" required value="${esc(lk?.name || "")}">
           <div class="hint">${t("linkNameHint")}</div>
+          <label>${t("linkCurrency")}</label>
+          <div class="row" style="flex-wrap:nowrap">
+            <select name="currency" style="width:110px">${[...new Set([...CURRENCIES, linkCur])].map((c) => `<option ${c === linkCur ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+            <button type="button" class="btn-ghost btn-small" id="lfConvert">${t("convert")}</button>
+          </div>
           <label>${t("linkItems")}</label>
           ${evs.length ? evs.map((e) => {
             const it = items.get(e.id);
-            const cur = it ? it.currency : e.currency;
-            const price = it ? it.price : e.price;
+            const price = it ? it.price : e.currency === linkCur ? e.price : null;
             return `
             <div class="list-item" data-ev="${esc(e.id)}">
               <label class="row link-ev"><input type="checkbox" class="inc" style="width:auto" ${it || !lk ? "checked" : ""}>
-                <span><strong>${esc(e.title)}</strong> <span class="muted small">${fmtDur(e.duration_min)}${e.active ? "" : " · " + t("off")}</span></span></label>
+                <span><strong>${esc(e.title)}</strong> <span class="muted small">${fmtDur(e.duration_min)} · ${t("original")} ${esc(fmtPrice(e.price, e.currency))}${e.active ? "" : " · " + t("off")}</span></span></label>
               <div class="row" style="flex-wrap:nowrap">
-                <select class="cur" style="width:100px">${[...new Set([...CURRENCIES, cur])].map((c) => `<option ${c === cur ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+                <span class="cur-label small"><strong>${esc(linkCur)}</strong></span>
                 <input class="pr" type="number" min="0" step="0.01" inputmode="decimal" placeholder="${t("free")}" value="${price ?? ""}" style="width:120px">
               </div>
             </div>`;
@@ -423,6 +428,23 @@
           </div>
         </form>`;
       const form = $f.querySelector("#lf");
+      form.elements.currency.onchange = () =>
+        form.querySelectorAll(".cur-label strong").forEach((el) => (el.textContent = form.elements.currency.value));
+      form.querySelector("#lfConvert").onclick = async () => {
+        const to = form.elements.currency.value;
+        try {
+          const r = await (await fetch(`https://open.er-api.com/v6/latest/${to}`)).json();
+          if (r.result !== "success") throw new Error(r["error-type"] || "rate");
+          for (const row of form.querySelectorAll("[data-ev]")) {
+            const ev = evs.find((x) => x.id === row.dataset.ev);
+            if (ev.price == null) continue;
+            const v = ev.currency === to ? ev.price : ev.price / r.rates[ev.currency];
+            const step = v >= 100 ? 10 : 1; // whole units; tens once prices reach the hundreds (TWD, JPY)
+            row.querySelector(".pr").value = Math.round(v / step) * step;
+          }
+          toast(t("converted"));
+        } catch (err) { toast(errMsg(err), true); }
+      };
       form.querySelector("#lfCancel").onclick = () => ($f.innerHTML = "");
       if (lk) form.querySelector("#lfDel").onclick = async () => {
         if (!confirm(t("confirmDeleteLink"))) return;
@@ -432,7 +454,7 @@
       form.onsubmit = async (e) => {
         e.preventDefault();
         const rows = [...form.querySelectorAll("[data-ev]")].filter((r) => r.querySelector(".inc").checked).map((r) => ({
-          event_type_id: r.dataset.ev, currency: r.querySelector(".cur").value,
+          event_type_id: r.dataset.ev, currency: form.elements.currency.value,
           price: r.querySelector(".pr").value === "" ? null : +r.querySelector(".pr").value,
         }));
         if (!rows.length) return toast(t("pickOne"), true);
