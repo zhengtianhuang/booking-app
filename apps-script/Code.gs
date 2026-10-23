@@ -103,7 +103,7 @@ function page(heading, rows, calUrl, extra) {
   const note = extra ? '<p style="color:#6b7083;font-size:13px">' + esc(extra) + "</p>" : "";
   return '<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:15px;color:#1c1f2a;max-width:520px">' +
     '<h2 style="font-size:18px">' + esc(heading) + "</h2><table>" + body + "</table>" + note + button +
-    '<p style="color:#9a9eb3;font-size:12px;margin-top:24px">Sent by Kee's Japanese Class</p></div>';
+    '<p style="color:#9a9eb3;font-size:12px;margin-top:24px">Sent by Kee&#39;s Japanese Class</p></div>';
 }
 
 function icsFile(d, method) {
