@@ -39,7 +39,8 @@ h2 { font-size: 1.15rem; font-weight: 800; margin: 0 0 .75rem; }
   padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right));
   position: sticky; top: 0; z-index: 5;
 }
-.brand { font-family: "Kalam", cursive; font-weight: 700; font-size: 1.4rem; color: var(--ink); }
+.brand { font-family: "Kalam", cursive; font-weight: 700; font-size: 1.4rem; color: var(--ink); white-space: nowrap; }
+@media (max-width: 480px) { .brand { font-size: 1.05rem; } }
 #nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
 main { max-width: 860px; margin: 0 auto; padding: 28px 16px 60px; }
