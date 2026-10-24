@@ -143,3 +143,9 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 
 .empty { padding: 24px 0; text-align: center; color: var(--muted); }
 code.link { word-break: break-all; font-size: .85rem; background: #fff; border: 2px dashed var(--card-line); border-radius: 10px; padding: 4px 8px; display: inline-block; }
+/* availability: specific dates calendar */
+.ov-cal { max-width: 340px; margin: 4px 0 12px; }
+.ov-cal .day.has { background: transparent; border-color: var(--card-line); font-weight: 600; }
+.ov-cal .day.closed { background: #c2b8a4; border-color: #a89e8a; text-decoration: line-through; }
+.day-row[data-date] .day-name { justify-content: space-between; }
+[hidden] { display: none !important; }

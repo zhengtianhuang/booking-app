@@ -43,6 +43,18 @@ create table if not exists public.availability (
   check (end_time > start_time)
 );
 
+-- added 2026-10-24: date-specific hours. If a date has any rows here, they replace the
+-- weekly hours for that date. A row with null times means "closed that day".
+create table if not exists public.date_overrides (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  day        date not null,
+  start_time time,
+  end_time   time,
+  check ((start_time is null and end_time is null) or end_time > start_time)
+);
+create index if not exists date_overrides_user_day on public.date_overrides (user_id, day);
+
 create table if not exists public.bookings (
   id             uuid primary key default gen_random_uuid(),
   event_type_id  uuid not null references public.event_types(id) on delete cascade,
@@ -92,6 +104,7 @@ alter table public.bookings add column if not exists price_link_id uuid
 alter table public.profiles     enable row level security;
 alter table public.event_types  enable row level security;
 alter table public.availability enable row level security;
+alter table public.date_overrides enable row level security;
 alter table public.bookings     enable row level security;
 alter table public.price_links      enable row level security;
 alter table public.price_link_items enable row level security;
@@ -122,6 +135,12 @@ drop policy if exists "availability public read" on public.availability;
 drop policy if exists "availability own write"   on public.availability;
 create policy "availability public read" on public.availability for select using (true);
 create policy "availability own write"   on public.availability for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+drop policy if exists "date_overrides public read" on public.date_overrides;
+drop policy if exists "date_overrides own write"   on public.date_overrides;
+create policy "date_overrides public read" on public.date_overrides for select using (true);
+create policy "date_overrides own write"   on public.date_overrides for all
   using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- Bookings hold invitee names/emails, so only the host can see them.
@@ -202,14 +221,21 @@ begin
   if l_start::date <> l_end::date and l_end::time <> time '00:00' then
     raise exception 'SLOT_OUTSIDE_HOURS';
   end if;
+  -- Date-specific hours replace the weekly hours for that date.
+  -- An end_time of 23:59 means "until midnight", so a slot ending at 00:00 fits it.
   if not exists (
-    select 1 from availability a
-    where a.user_id = et.user_id
-      and a.weekday = extract(dow from l_start)::int
-      and a.start_time <= l_start::time
-      -- an end_time of 23:59 means "until midnight", so a slot ending at 00:00 fits it
-      and case when l_end::time = time '00:00' then a.end_time = time '23:59'
-               else a.end_time >= l_end::time end
+    select 1 from (
+      select o.start_time, o.end_time from date_overrides o
+      where o.user_id = et.user_id and o.day = l_start::date and o.start_time is not null
+      union all
+      select a.start_time, a.end_time from availability a
+      where a.user_id = et.user_id
+        and a.weekday = extract(dow from l_start)::int
+        and not exists (select 1 from date_overrides o where o.user_id = et.user_id and o.day = l_start::date)
+    ) h
+    where h.start_time <= l_start::time
+      and case when l_end::time = time '00:00' then h.end_time = time '23:59'
+               else h.end_time >= l_end::time end
   ) then
     raise exception 'SLOT_OUTSIDE_HOURS';
   end if;
@@ -244,7 +270,7 @@ grant execute on function public.get_price_link(text) to anon, authenticated;
 -- Explicit table grants (RLS above still decides which rows), so this doesn't depend
 -- on the project's "automatically expose new tables" setting.
 grant usage on schema public to anon, authenticated;
-grant select on public.profiles, public.event_types, public.availability to anon, authenticated;
-grant insert, update, delete on public.profiles, public.event_types, public.availability to authenticated;
+grant select on public.profiles, public.event_types, public.availability, public.date_overrides to anon, authenticated;
+grant insert, update, delete on public.profiles, public.event_types, public.availability, public.date_overrides to authenticated;
 grant select, update on public.bookings to authenticated;
 grant select, insert, update, delete on public.price_links, public.price_link_items to authenticated;

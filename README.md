@@ -69,3 +69,9 @@ cd ~/Desktop/booking-app && python3 -m http.server 8000
 - 2026-10-20：Supabase 專案 `booking-app`（stkwjmhkcnpxlunghipr，Seoul）已建立、schema 已執行、Site URL / Redirect 已設、Email 驗證已關。
 - 後端 22 項測試全過（重複預約、超出時段、過去時間、隱私 RLS、取消後可再訂）；公開預約頁畫面確認正常。
 - 測試資料：使用者 `test-520f17` 和兩個 slotly-test-…@example.com 帳號，可在 Supabase → Authentication → Users 刪掉。
+
+## 指定日期（2026-10-24）
+
+「可預約時間」分頁下半部有一個日曆：點一天就能單獨設定那天的時段，或取消勾選設成休息；再點一次就移除。
+指定日期會取代那天的每週時間（存在 `date_overrides`，`book_slot` 伺服器端也照同樣規則檢查）。
+只想開放特定日期：把每週時間全部關掉，再在日曆上點要開放的日期。

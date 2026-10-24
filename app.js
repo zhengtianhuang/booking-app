@@ -36,6 +36,7 @@
       copyLink: "複製連結", copied: "連結已複製", edit: "編輯", delete: "刪除", cancel: "取消", close: "關閉",
       off: "已關閉", noEvents: "還沒有預約類型，先新增一個吧", yourPage: "你的公開預約頁",
       weekdays: ["週日", "週一", "週二", "週三", "週四", "週五", "週六"], addRange: "+ 時段", unavailable: "不開放",
+      weeklyHours: "每週固定時間", dateHours: "指定日期", dateHint: "點日曆上的日期，單獨設定那天開放的時段，或設成休息。指定日期會取代那天的每週時間。只想開放特定日期的話，把上面每週時間全部關掉，再在這裡點選要開放的日期。", noDates: "還沒有指定日期", openThatDay: "開放", closedDay: "休息",
       availHint: "以下時間以你的時區為準：", upcoming: "即將到來", past: "已過 / 已取消", noBookings: "目前沒有預約",
       cancelBooking: "取消這筆預約", confirmCancel: "確定要取消這筆預約嗎？", cancelled: "已取消",
       confirmDelete: "確定要刪除這個預約類型？相關預約紀錄也會一起刪除。",
@@ -73,6 +74,7 @@
       copyLink: "Copy link", copied: "Link copied", edit: "Edit", delete: "Delete", cancel: "Cancel", close: "Close",
       off: "Off", noEvents: "No event types yet — create one", yourPage: "Your public booking page",
       weekdays: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"], addRange: "+ Hours", unavailable: "Unavailable",
+      weeklyHours: "Weekly hours", dateHours: "Specific dates", dateHint: "Tap a date to set its own hours or mark it as a day off. These replace the weekly hours for that date. To open only certain dates, turn off every weekday above and pick the dates here.", noDates: "No specific dates yet", openThatDay: "Open", closedDay: "Day off",
       availHint: "Times are in your timezone:", upcoming: "Upcoming", past: "Past / cancelled", noBookings: "No bookings yet",
       cancelBooking: "Cancel booking", confirmCancel: "Cancel this booking?", cancelled: "Cancelled",
       confirmDelete: "Delete this event type? Its bookings will be deleted too.",
@@ -486,6 +488,16 @@
   async function tabAvailability($tab) {
     const rows = must(await sb.from("availability").select("*").eq("user_id", me.id).order("start_time"));
     const byDay = Array.from({ length: 7 }, (_, d) => rows.filter((r) => r.weekday === d).map((r) => [r.start_time.slice(0, 5), r.end_time.slice(0, 5)]));
+    const today = DateTime.now().setZone(me.timezone).startOf("day");
+    const lastDay = today.plus({ days: BOOKING_WINDOW_DAYS });
+    const ovRows = must(await sb.from("date_overrides").select("*").eq("user_id", me.id).gte("day", today.toISODate()).order("start_time"));
+    // date → ranges; an empty list means a day off
+    const dates = new Map();
+    for (const r of ovRows) {
+      if (!dates.has(r.day)) dates.set(r.day, []);
+      if (r.start_time) dates.get(r.day).push([r.start_time.slice(0, 5), r.end_time.slice(0, 5)]);
+    }
+    let month = today.startOf("month");
     const order = [1, 2, 3, 4, 5, 6, 0]; // Monday first
     // Dropdowns instead of <input type="time">: the native control squeezes "上午/下午" in and hides the time.
     const STEPS = [];
@@ -495,30 +507,85 @@
       .map((v) => `<option value="${v}" ${v === val ? "selected" : ""}>${v === "23:59" ? "24:00" : v}</option>`).join("")}</select>`;
     const rangeHtml = ([s, e]) => `<div class="range">${timeSelect("rs", s)} – ${timeSelect("re", e)}
       <button type="button" class="btn-ghost btn-small rm" title="${t("delete")}">✕</button></div>`;
+    const rangesHtml = (ranges, offLabel) => `<div><div class="ranges">${ranges.map(rangeHtml).join("")}</div>
+      <span class="muted small un" ${ranges.length ? "hidden" : ""}>${offLabel}</span>
+      <button type="button" class="btn-ghost btn-small add" ${ranges.length ? "" : "hidden"}>${t("addRange")}</button></div>`;
+    const readRanges = (row) => [...row.querySelectorAll(".range")].map((r) => [r.querySelector(".rs").value, r.querySelector(".re").value]);
+    const dateLabel = (k) => DateTime.fromISO(k).setLocale(locale()).toFormat(lang === "zh" ? "M/d (ccc)" : "ccc d LLL");
+
     $tab.innerHTML = `
       <form class="card" id="av">
-        <h2>${t("availability")}</h2>
+        <h2>${t("weeklyHours")}</h2>
         <p class="muted small">${t("availHint")} <strong>${esc(me.timezone)}</strong></p>
         ${order.map((d) => `
           <div class="day-row" data-day="${d}">
             <label class="day-name" style="margin:0"><input type="checkbox" class="on" ${byDay[d].length ? "checked" : ""}> ${t("weekdays")[d]}</label>
-            <div><div class="ranges">${byDay[d].map(rangeHtml).join("")}</div>
-              <span class="muted small un" ${byDay[d].length ? "hidden" : ""}>${t("unavailable")}</span>
-              <button type="button" class="btn-ghost btn-small add" ${byDay[d].length ? "" : "hidden"}>${t("addRange")}</button></div>
+            ${rangesHtml(byDay[d], t("unavailable"))}
           </div>`).join("")}
+        <h2 style="margin-top:24px">${t("dateHours")}</h2>
+        <p class="muted small">${t("dateHint")}</p>
+        <div class="ov-cal"></div>
+        <div class="ov-list"></div>
         <button class="btn-block" type="submit">${t("save")}</button>
       </form>`;
     const form = $tab.querySelector("#av");
+
+    // Keep edits made in the date rows before redrawing them.
+    const collectDates = () => form.querySelectorAll(".day-row[data-date]").forEach((row) => dates.set(row.dataset.date, readRanges(row)));
+    function drawDates() {
+      const lead = month.weekday % 7;
+      const cells = [];
+      for (let i = 0; i < lead; i++) cells.push(`<span></span>`);
+      for (let d = 1; d <= month.daysInMonth; d++) {
+        const day = month.set({ day: d }), k = day.toISODate();
+        const ok = day >= today && day <= lastDay;
+        const cls = !dates.has(k) ? (ok ? "has" : "") : dates.get(k).length ? "sel" : "sel closed";
+        cells.push(`<button type="button" class="day ${cls}" ${ok ? `data-pick="${k}"` : "disabled"}>${d}</button>`);
+      }
+      form.querySelector(".ov-cal").innerHTML = `
+        <div class="cal-head">
+          <button type="button" class="btn-ghost" id="ovPrev" ${month <= today.startOf("month") ? "disabled" : ""}>‹</button>
+          <strong>${esc(month.setLocale(locale()).toFormat("LLLL yyyy"))}</strong>
+          <button type="button" class="btn-ghost" id="ovNext" ${month >= lastDay.startOf("month") ? "disabled" : ""}>›</button>
+        </div>
+        <div class="cal">${t("weekdays").map((w) => `<span class="dow">${esc(w)}</span>`).join("")}${cells.join("")}</div>`;
+      const keys = [...dates.keys()].sort();
+      form.querySelector(".ov-list").innerHTML = keys.length ? keys.map((k) => `
+        <div class="day-row" data-date="${k}">
+          <div class="day-name">
+            <label style="margin:0;display:flex;gap:8px;align-items:center"><input type="checkbox" class="on" ${dates.get(k).length ? "checked" : ""}> ${esc(dateLabel(k))}</label>
+            <button type="button" class="btn-ghost btn-small rmdate" title="${t("delete")}">✕</button>
+          </div>
+          ${rangesHtml(dates.get(k), t("closedDay"))}
+        </div>`).join("") : `<p class="muted small">${t("noDates")}</p>`;
+    }
+    drawDates();
+
     const sync = (row) => {
       const has = row.querySelectorAll(".range").length > 0;
       row.querySelector(".on").checked = has;
       row.querySelector(".un").hidden = has;
       row.querySelector(".add").hidden = !has;
     };
+    const redraw = () => { collectDates(); drawDates(); };
     form.addEventListener("click", (e) => {
+      if (e.target.id === "ovPrev") { collectDates(); month = month.minus({ months: 1 }); return drawDates(); }
+      if (e.target.id === "ovNext") { collectDates(); month = month.plus({ months: 1 }); return drawDates(); }
+      const pick = e.target.closest("[data-pick]");
+      if (pick) {
+        collectDates();
+        const k = pick.dataset.pick;
+        if (dates.has(k)) dates.delete(k);
+        else {
+          const wk = byDay[DateTime.fromISO(k).weekday % 7];
+          dates.set(k, wk.length ? wk.map((r) => [...r]) : [["09:00", "17:00"]]);
+        }
+        return drawDates();
+      }
       const row = e.target.closest(".day-row");
       if (!row) return;
-      if (e.target.classList.contains("rm")) { e.target.closest(".range").remove(); sync(row); }
+      if (e.target.classList.contains("rmdate")) { row.remove(); dates.delete(row.dataset.date); return redraw(); }
+      if (e.target.classList.contains("rm")) { e.target.closest(".range").remove(); sync(row); if (row.dataset.date) redraw(); }
       if (e.target.classList.contains("add")) {
         const last = [...row.querySelectorAll(".re")].pop();
         const start = last ? last.value : "09:00";
@@ -530,20 +597,32 @@
       const row = e.target.closest(".day-row");
       row.querySelector(".ranges").innerHTML = e.target.checked ? rangeHtml(["09:00", "17:00"]) : "";
       sync(row);
+      if (row.dataset.date) redraw();
     });
     form.onsubmit = async (e) => {
       e.preventDefault();
+      collectDates();
+      const bad = (s, en) => !s || !en || en <= s;
       const out = [];
-      for (const row of form.querySelectorAll(".day-row")) {
-        for (const r of row.querySelectorAll(".range")) {
-          const s = r.querySelector(".rs").value, en = r.querySelector(".re").value;
-          if (!s || !en || en <= s) return toast(`${t("weekdays")[row.dataset.day]}: ${s}–${en} ✕`, true);
+      for (const row of form.querySelectorAll(".day-row[data-day]")) {
+        for (const [s, en] of readRanges(row)) {
+          if (bad(s, en)) return toast(`${t("weekdays")[row.dataset.day]}: ${s}–${en} ✕`, true);
           out.push({ user_id: me.id, weekday: +row.dataset.day, start_time: s, end_time: en });
+        }
+      }
+      const ov = [];
+      for (const [k, ranges] of dates) {
+        if (!ranges.length) ov.push({ user_id: me.id, day: k, start_time: null, end_time: null });
+        for (const [s, en] of ranges) {
+          if (bad(s, en)) return toast(`${dateLabel(k)}: ${s}–${en} ✕`, true);
+          ov.push({ user_id: me.id, day: k, start_time: s, end_time: en });
         }
       }
       try {
         must(await sb.from("availability").delete().eq("user_id", me.id));
         if (out.length) must(await sb.from("availability").insert(out));
+        must(await sb.from("date_overrides").delete().eq("user_id", me.id).gte("day", today.toISODate()));
+        if (ov.length) must(await sb.from("date_overrides").insert(ov));
         toast(t("saved"));
       } catch (err) { toast(errMsg(err), true); }
     };
@@ -654,14 +733,17 @@
 
   // All bookable start times (UTC ISO strings) for the next BOOKING_WINDOW_DAYS days.
   // Slots step by duration + buffer, and stay `buffer` minutes clear of existing bookings.
-  function computeSlots(avail, hostTz, duration, buffer, busy) {
+  function computeSlots(avail, overrides, hostTz, duration, buffer, busy) {
     const now = DateTime.now().plus({ minutes: MIN_NOTICE_MIN });
     const busyMs = busy.map((b) => [Date.parse(b.start_at), Date.parse(b.end_at)]);
     const slots = [];
     let day = DateTime.now().setZone(hostTz).startOf("day");
     for (let i = 0; i <= BOOKING_WINDOW_DAYS; i++, day = day.plus({ days: 1 })) {
       const weekday = day.weekday % 7; // luxon: Mon=1…Sun=7 → 0=Sun
-      for (const w of avail.filter((a) => a.weekday === weekday)) {
+      // Date-specific hours replace that date's weekly hours (a row with no times = day off).
+      const ov = overrides.filter((o) => o.day === day.toISODate());
+      const hours = ov.length ? ov.filter((o) => o.start_time) : avail.filter((a) => a.weekday === weekday);
+      for (const w of hours) {
         const [sh, sm] = w.start_time.split(":").map(Number);
         const [eh, em] = w.end_time.split(":").map(Number);
         let s = day.set({ hour: sh, minute: sm });
@@ -686,10 +768,12 @@
 
   async function bookingPage(host, ev, { link, back }) {
     const avail = must(await sb.from("availability").select("weekday, start_time, end_time").eq("user_id", host.id));
+    const overrides = must(await sb.from("date_overrides").select("day, start_time, end_time").eq("user_id", host.id)
+      .gte("day", DateTime.now().setZone(host.timezone).toISODate()));
     const from = new Date().toISOString();
     const to = DateTime.now().plus({ days: BOOKING_WINDOW_DAYS + 2 }).toUTC().toISO();
     const busy = must(await sb.rpc("get_busy", { p_host: host.id, p_from: from, p_to: to }));
-    const slots = computeSlots(avail, host.timezone, ev.duration_min, ev.buffer_min ?? 0, busy);
+    const slots = computeSlots(avail, overrides, host.timezone, ev.duration_min, ev.buffer_min ?? 0, busy);
 
     let viewTz = guessTz();
     let month = null, selDay = null;
