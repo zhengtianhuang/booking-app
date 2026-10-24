@@ -900,16 +900,21 @@
       const stamp = (d) => d.toFormat("yyyyLLdd'T'HHmmss'Z'");
       const name = host.display_name || host.username;
       const title = `${ev.title} — ${name}`;
-      const gcal = "https://calendar.google.com/calendar/render?action=TEMPLATE"
-        + `&text=${encodeURIComponent(title)}&dates=${stamp(start)}/${stamp(end)}`
-        + `&details=${encodeURIComponent(ev.description || "")}&location=${encodeURIComponent(ev.location || "")}`;
       const icsEsc = (s) => String(s || "").replace(/([\\,;])/g, "\\$1").replace(/\n/g, "\\n");
-      const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Slotly//EN", "BEGIN:VEVENT",
-        `UID:${stamp(start)}-${ev.id}@slotly`, `DTSTAMP:${stamp(DateTime.utc())}`,
-        `DTSTART:${stamp(start)}`, `DTEND:${stamp(end)}`, `SUMMARY:${icsEsc(title)}`,
-        `DESCRIPTION:${icsEsc(ev.description)}`, `LOCATION:${icsEsc(ev.location)}`,
-        "END:VEVENT", "END:VCALENDAR"].join("\r\n");
-      const icsUrl = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+      // Rebuilt with the Meet link as the location once it arrives.
+      const calLinks = (location, meet) => {
+        const details = [meet && `Google Meet: ${meet}`, ev.description].filter(Boolean).join("\n\n");
+        const gcal = "https://calendar.google.com/calendar/render?action=TEMPLATE"
+          + `&text=${encodeURIComponent(title)}&dates=${stamp(start)}/${stamp(end)}`
+          + `&details=${encodeURIComponent(details)}&location=${encodeURIComponent(location || "")}`;
+        const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Slotly//EN", "BEGIN:VEVENT",
+          `UID:${stamp(start)}-${ev.id}@slotly`, `DTSTAMP:${stamp(DateTime.utc())}`,
+          `DTSTART:${stamp(start)}`, `DTEND:${stamp(end)}`, `SUMMARY:${icsEsc(title)}`,
+          `DESCRIPTION:${icsEsc(details)}`, `LOCATION:${icsEsc(location)}`,
+          "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+        return { gcal, icsUrl: URL.createObjectURL(new Blob([ics], { type: "text/calendar" })) };
+      };
+      const { gcal, icsUrl } = calLinks(ev.location);
       $app.innerHTML = `
         <div class="card narrow center">
           <div class="success">✅</div>
@@ -919,22 +924,26 @@
           ${ev.location ? `<p>📍 ${esc(ev.location)}</p>` : ""}
           <p id="meet" class="small muted"></p>
           <div class="row" style="justify-content:center">
-            <a class="btn" href="${gcal}" target="_blank" rel="noopener">${t("addGoogle")}</a>
-            <a class="btn btn-ghost" href="${icsUrl}" download="booking.ics">${t("downloadIcs")}</a>
+            <a class="btn" id="gcalBtn" href="${gcal}" target="_blank" rel="noopener">${t("addGoogle")}</a>
+            <a class="btn btn-ghost" id="icsBtn" href="${icsUrl}" download="booking.ics">${t("downloadIcs")}</a>
           </div>
           <p class="small" style="margin-top:20px"><a href="${back}">${t("bookAnother")}</a></p>
         </div>`;
-      pollMeet(id);
+      pollMeet(id, (meet) => {
+        const l = calLinks(meet, meet);
+        document.getElementById("gcalBtn").href = l.gcal;
+        document.getElementById("icsBtn").href = l.icsUrl;
+      });
     }
 
     // The Meet link is created a few seconds after booking (trigger → Edge Function), if the
     // host has connected Google. Poll briefly; stay silent for hosts without Google.
-    async function pollMeet(id) {
+    async function pollMeet(id, onMeet) {
       const $m = document.getElementById("meet");
       for (let i = 0; i < 8 && $m.isConnected; i++) {
         await new Promise((r) => setTimeout(r, 1500));
         const url = (await sb.rpc("booking_meet", { p_id: id })).data;
-        if (url) { $m.innerHTML = `🎥 <a href="${esc(url)}" target="_blank" rel="noopener"><strong>Google Meet</strong></a> · ${esc(url)}`; $m.className = "small"; return; }
+        if (url) { $m.innerHTML = `🎥 <a href="${esc(url)}" target="_blank" rel="noopener"><strong>Google Meet</strong></a> · ${esc(url)}`; $m.className = "small"; onMeet(url); return; }
       }
     }
 
