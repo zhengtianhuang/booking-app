@@ -12,7 +12,13 @@
     lockChain = run.catch(() => {});
     return run;
   };
-  const sb = configured ? supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { lock: tabLock } }) : null;
+  // iOS (especially the home-screen app) often fails the first request after the app was in
+  // the background with "TypeError: Load failed" — a dead keep-alive connection. Retry once.
+  const retryFetch = (url, opts) => fetch(url, opts).catch((err) => {
+    if (!(err instanceof TypeError) || opts?.signal?.aborted) throw err;
+    return new Promise((r) => setTimeout(r, 400)).then(() => fetch(url, opts));
+  });
+  const sb = configured ? supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { lock: tabLock }, global: { fetch: retryFetch } }) : null;
   const $app = document.getElementById("app");
   const $nav = document.getElementById("nav");
 
