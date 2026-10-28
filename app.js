@@ -192,7 +192,8 @@
   async function route() {
     renderNav();
     if (!configured) return viewNotConfigured();
-    const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+    // Instagram/Facebook append ?utm_…&fbclid=… after the hash, so drop any query part.
+    const parts = location.hash.replace(/^#\/?/, "").split("?")[0].split("/").filter(Boolean).map(decodeURIComponent);
     try {
       if (parts[0] === "u" && parts[1] && parts[2]) return await viewBook(parts[1], parts[2]);
       if (parts[0] === "u" && parts[1]) return await viewPublicProfile(parts[1]);
